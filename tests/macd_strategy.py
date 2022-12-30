@@ -60,7 +60,7 @@ class SimpleMACD:
             and self.MACD_CO_vals[i] < 0
         ):
             exit_dict = self.generate_exit_levels(signal=1, i=i)
-            new_order = Order(
+            return Order(
                 direction=1,
                 stop_loss=exit_dict["stop_loss"],
                 take_profit=exit_dict["take_profit"],
@@ -72,16 +72,14 @@ class SimpleMACD:
             and self.MACD_CO_vals[i] > 0
         ):
             exit_dict = self.generate_exit_levels(signal=-1, i=i)
-            new_order = Order(
+            return Order(
                 direction=-1,
                 stop_loss=exit_dict["stop_loss"],
                 take_profit=exit_dict["take_profit"],
             )
 
         else:
-            new_order = Order()
-
-        return new_order
+            return Order()
 
     def generate_exit_levels(self, signal, i):
         """Function to determine stop loss and take profit levels."""
@@ -91,17 +89,14 @@ class SimpleMACD:
         if signal == 0:
             stop = None
             take = None
+        elif signal == 1:
+            stop = self.swings.Lows[i]
+            take = self.data.Close[i] + RR * (self.data.Close[i] - stop)
         else:
-            if signal == 1:
-                stop = self.swings.Lows[i]
-                take = self.data.Close[i] + RR * (self.data.Close[i] - stop)
-            else:
-                stop = self.swings.Highs[i]
-                take = self.data.Close[i] - RR * (stop - self.data.Close[i])
+            stop = self.swings.Highs[i]
+            take = self.data.Close[i] - RR * (stop - self.data.Close[i])
 
-        exit_dict = {"stop_loss": stop, "stop_type": stop_type, "take_profit": take}
-
-        return exit_dict
+        return {"stop_loss": stop, "stop_type": stop_type, "take_profit": take}
 
 
 if __name__ == "__main__":

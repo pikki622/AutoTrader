@@ -95,7 +95,7 @@ class Broker(AbstractBroker):
     ) -> dict:
         """Returns orders associated with the account."""
 
-        for attempt in range(2):
+        for _ in range(2):
             try:
                 # Check for order id
                 if "order_id" in kwargs:
@@ -107,29 +107,27 @@ class Broker(AbstractBroker):
                             )
                         ]
 
+                elif order_status == "cancelled":
+                    # Fetch cancelled orders
+                    orders = self.api.fetchCanceledOrders(instrument, **kwargs)
+
+                elif order_status == "closed":
+                    # Fetch closed orders
+                    orders = self.api.fetchClosedOrders(instrument, **kwargs)
+
+                elif order_status == "conditional":
+                    # Fetch conditional orders
+                    orders = self.api.fetchOpenOrders(
+                        instrument, params={"orderType": "conditional"}
+                    )
+
+                elif order_status == "open":
+                    # Fetch open orders (waiting to be filled)
+                    orders = self.api.fetchOpenOrders(instrument, **kwargs)
+
                 else:
-                    # TODO - add exception handling
-                    if order_status == "open":
-                        # Fetch open orders (waiting to be filled)
-                        orders = self.api.fetchOpenOrders(instrument, **kwargs)
-
-                    elif order_status == "cancelled":
-                        # Fetch cancelled orders
-                        orders = self.api.fetchCanceledOrders(instrument, **kwargs)
-
-                    elif order_status == "closed":
-                        # Fetch closed orders
-                        orders = self.api.fetchClosedOrders(instrument, **kwargs)
-
-                    elif order_status == "conditional":
-                        # Fetch conditional orders
-                        orders = self.api.fetchOpenOrders(
-                            instrument, params={"orderType": "conditional"}
-                        )
-
-                    else:
-                        # Unrecognised order status
-                        raise Exception(f"Unrecognised order status '{order_status}'.")
+                    # Unrecognised order status
+                    raise Exception(f"Unrecognised order status '{order_status}'.")
 
                 # Completed without exception, break loop
                 break
@@ -167,9 +165,7 @@ class Broker(AbstractBroker):
             time.sleep(1)
             trades_list = self.api.fetchMyTrades(instrument, **kwargs)
 
-        # Convert to native Trades
-        trades = self._convert_list(trades_list, item_type="trade")
-        return trades
+        return self._convert_list(trades_list, item_type="trade")
 
     def get_trade_details(self, trade_ID: str) -> dict:
         """Returns the details of the trade specified by trade_ID."""
@@ -198,38 +194,32 @@ class Broker(AbstractBroker):
             A dictionary containing details of the open positions.
 
         """
-        for attempt in range(2):
+        for _ in range(2):
             try:
                 if instrument is None:
-                    # Get all positions
-                    if self.api.has["fetchPositions"]:
-                        positions = self.api.fetchPositions(symbols=None, params=kwargs)
-                        positions = self._convert_list(positions, item_type="position")
-
-                    else:
+                    if not self.api.has["fetchPositions"]:
                         raise Exception(
-                            f"Exchange {self.exchange} does not have "
-                            + "fetchPositions method."
+                            f"Exchange {self.exchange} does not have fetchPositions method."
                         )
+                    positions = self.api.fetchPositions(symbols=None, params=kwargs)
+                    positions = self._convert_list(positions, item_type="position")
+
+                elif self.api.has["fetchPosition"]:
+                    position = self.api.fetchPosition(instrument, params=kwargs)
+                    positions = (
+                        {instrument: self._native_position(position)}
+                        if position is not None
+                        else {}
+                    )
+                elif self.api.has["fetchPositions"]:
+                    positions = self.api.fetchPositions(
+                        symbols=[instrument], params=kwargs
+                    )
+                    positions = self._convert_list(positions, item_type="position")
                 else:
-                    # Get position in instrument provided
-                    if self.api.has["fetchPosition"]:
-                        position = self.api.fetchPosition(instrument, params=kwargs)
-                        if position is not None:
-                            positions = {instrument: self._native_position(position)}
-                        else:
-                            positions = {}
-
-                    elif self.api.has["fetchPositions"]:
-                        positions = self.api.fetchPositions(
-                            symbols=[instrument], params=kwargs
-                        )
-                        positions = self._convert_list(positions, item_type="position")
-                    else:
-                        raise Exception(
-                            f"Exchange {self.exchange} does not have "
-                            + "fetchPosition method."
-                        )
+                    raise Exception(
+                        f"Exchange {self.exchange} does not have fetchPosition method."
+                    )
 
                 # Completed without exception, break loop
                 break
@@ -238,13 +228,11 @@ class Broker(AbstractBroker):
                 # Throttle then try again
                 time.sleep(1)
 
-        # Check for zero-positions
-        positions_dict = {}
-        for symbol, pos in positions.items():
-            if pos.net_position != 0:
-                positions_dict[symbol] = pos
-
-        return positions_dict
+        return {
+            symbol: pos
+            for symbol, pos in positions.items()
+            if pos.net_position != 0
+        }
 
     def get_orderbook(self, instrument: str) -> OrderBook:
         """Returns the orderbook"""
@@ -261,16 +249,12 @@ class Broker(AbstractBroker):
         direction = 1 if order["side"] == "buy" else -1
         order_type = order["type"].lower()
 
-        if order_type == "limit":
-            limit_price = order["price"]
-        else:
-            limit_price = None
-
+        limit_price = order["price"] if order_type == "limit" else None
         stop_price = (
             float(order["stopPrice"]) if order["stopPrice"] is not None else None
         )
 
-        native_order = Order(
+        return Order(
             instrument=order["symbol"],
             direction=direction,
             order_type=order_type,
@@ -282,7 +266,6 @@ class Broker(AbstractBroker):
             order_time=datetime.fromtimestamp(order["timestamp"] / 1000),
             ccxt_order=order,
         )
-        return native_order
 
     def _native_trade(self, trade):
         """Returns a CCXT trade as a native AutoTrader Trade."""
@@ -298,7 +281,7 @@ class Broker(AbstractBroker):
         if not oid_assigned:
             parent_order_id = None
 
-        native_trade = Trade(
+        return Trade(
             instrument=trade["symbol"],
             order_price=None,
             order_time=None,
@@ -315,8 +298,6 @@ class Broker(AbstractBroker):
             order_id=parent_order_id,
         )
 
-        return native_trade
-
     def _native_position(self, position):
         """Returns a CCXT position structure as a native
         AutoTrader Position.
@@ -329,9 +310,7 @@ class Broker(AbstractBroker):
 
         direction = 1 if position["side"] == "long" else -1
 
-        # Construct position object
-        # TODO - add more attributes
-        native_position = Position(
+        return Position(
             instrument=symbol,
             net_position=position["contracts"] * direction,
             net_exposure=position["notional"],
@@ -344,7 +323,6 @@ class Broker(AbstractBroker):
             avg_price=position["entryPrice"],
             total_margin=position["initialMargin"],
         )
-        return native_position
 
     def _convert_list(self, items, item_type="order"):
         """Converts a list of trades or orders to a dictionary."""

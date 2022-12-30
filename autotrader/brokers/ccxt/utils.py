@@ -72,14 +72,12 @@ class Utils(BrokerUtils):
     def get_stepsize(self, instrument, *args, **kwargs):
         """Returns the stepsize for an instrument."""
         market = self._get_market(instrument)
-        stepsize = float(market["limits"]["amount"]["min"])
-        return stepsize
+        return float(market["limits"]["amount"]["min"])
 
     def get_min_notional(self, instrument, *args, **kwargs):
         """Returns the minimum notional value a trade should hold."""
         market = self._get_market(instrument)
-        min_notional = float(market["limits"]["cost"]["min"])
-        return min_notional
+        return float(market["limits"]["cost"]["min"])
 
     def get_ticksize(self, instrument, *args, **kwargs):
         """Returns the ticksize for an instrument."""

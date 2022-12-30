@@ -94,14 +94,15 @@ class Broker(AbstractBroker):
         orders = {}
 
         for order in oanda_pending_orders:
-            if order.type != "TAKE_PROFIT" and order.type != "STOP_LOSS":
-                new_order = {}
-                new_order["id"] = order.id
-                new_order["status"] = "open"
-                new_order["order_type"] = order.type
-                new_order["order_stop_price"] = order.price
-                new_order["order_limit_price"] = order.price
-                new_order["direction"] = np.sign(order.units)
+            if order.type not in ["TAKE_PROFIT", "STOP_LOSS"]:
+                new_order = {
+                    "id": order.id,
+                    "status": "open",
+                    "order_type": order.type,
+                    "order_stop_price": order.price,
+                    "order_limit_price": order.price,
+                    "direction": np.sign(order.units),
+                }
                 new_order["order_time"] = order.createTime
                 new_order["instrument"] = order.instrument
                 new_order["size"] = abs(order.units)
@@ -184,14 +185,15 @@ class Broker(AbstractBroker):
     @staticmethod
     def _oanda_trade_to_dict(trade) -> dict:
         """Converts an Oanda Trade object to a dictionary."""
-        new_trade = {}
         related_orders = []
-        new_trade["instrument"] = trade.instrument
-        new_trade["time_filled"] = trade.openTime
-        new_trade["fill_price"] = trade.price
-        new_trade["size"] = abs(trade.currentUnits)
-        new_trade["id"] = trade.id
-        new_trade["direction"] = np.sign(trade.currentUnits)
+        new_trade = {
+            "instrument": trade.instrument,
+            "time_filled": trade.openTime,
+            "fill_price": trade.price,
+            "size": abs(trade.currentUnits),
+            "id": trade.id,
+            "direction": np.sign(trade.currentUnits),
+        }
         new_trade["margin_required"] = trade.marginUsed
         new_trade["unrealised_PL"] = trade.unrealizedPL
         new_trade["fees"] = trade.financing
@@ -222,41 +224,6 @@ class Broker(AbstractBroker):
             + "be removed in a future release. Please use the "
             + "get_trades method instead."
         )
-        response = self.api.trade.list(accountID=self.ACCOUNT_ID, ids=int(trade_ID))
-        trade = response.body["trades"][0]
-
-        details = {
-            "direction": int(np.sign(trade.currentUnits)),
-            "order_time": datetime.datetime.strptime(
-                trade.openTime[:-4], "%Y-%m-%dT%H:%M:%S.%f"
-            ),
-            "instrument": trade.instrument,
-            "size": trade.currentUnits,
-            "order_price": trade.price,
-            "order_ID": trade.id,
-            "time_filled": trade.openTime,
-            "entry_price": trade.price,
-            "unrealised_PL": trade.unrealizedPL,
-            "margin_required": trade.marginUsed,
-        }
-
-        # Get associated trades
-        related = []
-        try:
-            details["take_profit"] = trade.takeProfitOrder.price
-            related.append(trade.takeProfitOrder.id)
-        except:
-            pass
-
-        try:
-            details["stop_loss"] = trade.stopLossOrder.price
-            related.append(trade.stopLossOrder.id)
-        except:
-            pass
-        details["related_orders"] = related
-
-        # TODO - veryify functionality of below...
-        return Trade(trade)
 
     def get_positions(self, instrument: str = None, **kwargs) -> dict:
         """Gets the current positions open on the account."""
@@ -279,12 +246,9 @@ class Broker(AbstractBroker):
             # fetch trade ID'strade_IDs
             trade_IDs = []
             if abs(pos["long_units"]) > 0:
-                for ID in position.long.tradeIDs:
-                    trade_IDs.append(ID)
+                trade_IDs.extend(iter(position.long.tradeIDs))
             if abs(pos["short_units"]) > 0:
-                for ID in position.short.tradeIDs:
-                    trade_IDs.append(ID)
-
+                trade_IDs.extend(iter(position.short.tradeIDs))
             pos["trade_IDs"] = trade_IDs
 
             if instrument is not None and position.instrument == instrument:
@@ -306,17 +270,14 @@ class Broker(AbstractBroker):
     def get_summary(self):
         """Returns account summary."""
         self._check_connection()
-        # response = self.api.account.get(accountID=self.ACCOUNT_ID)
-        response = self.api.account.summary(accountID=self.ACCOUNT_ID)
-        return response
+        return self.api.account.summary(accountID=self.ACCOUNT_ID)
 
     def get_data(self, pair: str, period: int, interval: str) -> pd.DataFrame:
         self._check_connection()
         response = self.api.instrument.candles(
             pair, granularity=interval, count=period, dailyAlignment=0
         )
-        data = self._utils.response_to_df(response)
-        return data
+        return self._utils.response_to_df(response)
 
     def check_trade_size(self, instrument: str, units: float) -> float:
         """Checks the requested trade size against the minimum trade size
@@ -378,9 +339,7 @@ class Broker(AbstractBroker):
             index=[new_time],
         )
 
-        new_data = pd.concat([data, new_candle])
-
-        return new_data
+        return pd.concat([data, new_candle])
 
     def get_historical_data(self, instrument, interval, from_time, to_time):
 
@@ -390,9 +349,7 @@ class Broker(AbstractBroker):
             instrument, granularity=interval, fromTime=from_time, toTime=to_time
         )
 
-        data = self._utils.response_to_df(response)
-
-        return data
+        return self._utils.response_to_df(response)
 
     def deconstruct_granularity(self, granularity: str):
         """Returns a dict with the seconds, minutes, hours and days
@@ -403,15 +360,11 @@ class Broker(AbstractBroker):
         letter = granularity[0]
 
         # Get timeframe multiple (eg. 15)
-        if len(granularity) > 1:
-            number = float(granularity[1:])
-        else:
-            number = 1
-
-        if letter == "S":
-            seconds = number
+        number = float(granularity[1:]) if len(granularity) > 1 else 1
+        if letter == "H":
+            seconds = 0
             minutes = 0
-            hours = 0
+            hours = number
             days = 0
 
         elif letter == "M":
@@ -420,10 +373,10 @@ class Broker(AbstractBroker):
             hours = 0
             days = 0
 
-        elif letter == "H":
-            seconds = 0
+        elif letter == "S":
+            seconds = number
             minutes = 0
-            hours = number
+            hours = 0
             days = 0
 
         else:
@@ -432,14 +385,12 @@ class Broker(AbstractBroker):
             hours = 0
             days = number
 
-        granularity_details = {
+        return {
             "seconds": seconds,
             "minutes": minutes,
             "hours": hours,
             "days": days,
         }
-
-        return granularity_details
 
     def get_reduced_granularity(self, granularity_details, fraction):
         """Returns a candlestick granularity as a fraction of given granularity"""
@@ -464,27 +415,21 @@ class Broker(AbstractBroker):
 
         elif hours > 1:
             base = 2
-            letter = "H"
             number = base * round(hours / base)
-            if number > 12:
-                number = 12
-            reduced_granularity = letter + str(number)
+            number = min(number, 12)
+            reduced_granularity = f"H{str(number)}"
 
         elif minutes > 1:
             base = 15
-            letter = "M"
             number = base * round(minutes / base)
-            if number > 30:
-                number = 30
-            reduced_granularity = letter + str(number)
+            number = min(number, 30)
+            reduced_granularity = f"M{str(number)}"
 
         else:
             base = 15
-            letter = "S"
             number = base * round(seconds / base)
-            if number > 30:
-                number = 30
-            reduced_granularity = letter + str(number)
+            number = min(number, 30)
+            reduced_granularity = f"S{str(number)}"
 
         if reduced_granularity[1:] == "0":
             reduced_granularity = reduced_granularity[0] + "1"
@@ -514,24 +459,24 @@ class Broker(AbstractBroker):
                 trace_back = traceback.extract_tb(ex_traceback)
 
                 # Format stacktrace
-                stack_trace = list()
+                stack_trace = []
 
                 for trace in trace_back:
-                    trade_string = "File : %s , Line : %d, " % (
-                        trace[0],
-                        trace[1],
-                    ) + "Func.Name : %s, Message : %s" % (trace[2], trace[3])
+                    trade_string = (
+                        "File : %s , Line : %d, "
+                        % (
+                            trace[0],
+                            trace[1],
+                        )
+                        + f"Func.Name : {trace[2]}, Message : {trace[3]}"
+                    )
                     stack_trace.append(trade_string)
 
                 print("\nWARNING FROM OANDA API: The following exception was caught.")
-                print(
-                    "Time: {}".format(
-                        datetime.datetime.now().strftime("%b %d %H:%M:%S")
-                    )
-                )
-                print("Exception type : %s " % ex_type.__name__)
-                print("Exception message : %s" % ex_value)
-                print("Stack trace : %s" % stack_trace)
+                print(f'Time: {datetime.datetime.now().strftime("%b %d %H:%M:%S")}')
+                print(f"Exception type : {ex_type.__name__} ")
+                print(f"Exception message : {ex_value}")
+                print(f"Stack trace : {stack_trace}")
                 print("  Attempting to reconnect to Oanda v20 API.")
 
                 time.sleep(3)
@@ -555,15 +500,13 @@ class Broker(AbstractBroker):
         # Check position size
         size = self.check_trade_size(order.instrument, order.size)
 
-        response = self.api.order.market(
+        return self.api.order.market(
             accountID=self.ACCOUNT_ID,
             instrument=order.instrument,
             units=order.direction * size,
             takeProfitOnFill=take_profit_details,
             **stop_loss_order
         )
-
-        return response
 
     def _place_stop_limit_order(self, order):
         """Places MarketIfTouchedOrder with Oanda.
@@ -581,8 +524,7 @@ class Broker(AbstractBroker):
         trigger_condition = order.trigger_price
         size = self.check_trade_size(order.instrument, order.size)
 
-        # Need to test cases when no stop/take is provided (as None type)
-        response = self.api.order.market_if_touched(
+        return self.api.order.market_if_touched(
             accountID=self.ACCOUNT_ID,
             instrument=order.instrument,
             units=order.direction * size,
@@ -592,7 +534,6 @@ class Broker(AbstractBroker):
             triggerCondition=trigger_condition,
             **stop_loss_order
         )
-        return response
 
     def _place_stop_order(self, order: Order):
         """Places a stop order."""
@@ -609,7 +550,7 @@ class Broker(AbstractBroker):
         trigger_condition = order.trigger_price
         size = self.check_trade_size(order.instrument, order.size)
 
-        response = self.api.order.stop(
+        return self.api.order.stop(
             accountID=self.ACCOUNT_ID,
             instrument=order.instrument,
             units=order.direction * size,
@@ -619,7 +560,6 @@ class Broker(AbstractBroker):
             takeProfitOnFill=take_profit_details,
             **stop_loss_order
         )
-        return response
 
     def _place_limit_order(self, order: Order):
         """PLaces a limit order."""
@@ -634,7 +574,7 @@ class Broker(AbstractBroker):
         trigger_condition = order.trigger_price
         size = self.check_trade_size(order.instrument, order.size)
 
-        response = self.api.order.limit(
+        return self.api.order.limit(
             accountID=self.ACCOUNT_ID,
             instrument=order.instrument,
             units=order.direction * size,
@@ -643,7 +583,6 @@ class Broker(AbstractBroker):
             triggerCondition=trigger_condition,
             **stop_loss_order
         )
-        return response
 
     def _modify_trade(self, order):
         """Modifies the take profit and/or stop loss of an existing trade.
@@ -696,60 +635,54 @@ class Broker(AbstractBroker):
     def _get_stop_loss_order(self, order: Order) -> dict:
         """Constructs stop loss order dictionary."""
         self._check_connection()
-        if order.stop_type is not None:
-            price = self._check_precision(order.instrument, order.stop_loss)
+        if order.stop_type is None:
+            return {}
 
-            if order.stop_type == "trailing":
-                # Trailing stop loss order
-                SL_type = "trailingStopLossOnFill"
+        price = self._check_precision(order.instrument, order.stop_loss)
+
+        if order.stop_type == "trailing":
+            # Trailing stop loss order
+            SL_type = "trailingStopLossOnFill"
 
                 # Calculate stop loss distance
-                if order.stop_distance is None:
+            if order.stop_distance is None:
                     # Calculate stop distance from stop loss price provided
-                    if order._working_price is not None:
-                        working_price = order._working_price
-                    else:
-                        if order.order_type == "market":
-                            # Get current market price
-                            last = self._get_price(order.instrument)
-                            working_price = (
-                                last.closeoutBid
-                                if order.direction < 0
-                                else last.closeoutAsk
-                            )
-                        elif order.order_type in ["limit", "stop-limit"]:
-                            working_price = order.order_limit_price
-                    distance = abs(working_price - order.stop_loss)
+                if order._working_price is not None:
+                    working_price = order._working_price
+                elif order.order_type == "market":
+                    # Get current market price
+                    last = self._get_price(order.instrument)
+                    working_price = (
+                        last.closeoutBid
+                        if order.direction < 0
+                        else last.closeoutAsk
+                    )
+                elif order.order_type in ["limit", "stop-limit"]:
+                    working_price = order.order_limit_price
+                distance = abs(working_price - order.stop_loss)
 
-                else:
-                    # Calculate distance using provided pip distance
-                    pip_value = 10 ** self.get_pip_location(order.instrument)
-                    distance = abs(order.stop_distance * pip_value)
-
-                # Construct stop loss order details
-                distance = self._check_precision(order.instrument, distance)
-                SL_details = {"distance": str(distance), "type": "TRAILING_STOP_LOSS"}
             else:
-                SL_type = "stopLossOnFill"
-                SL_details = {"price": str(price)}
+                # Calculate distance using provided pip distance
+                pip_value = 10 ** self.get_pip_location(order.instrument)
+                distance = abs(order.stop_distance * pip_value)
 
-            stop_loss_order = {SL_type: SL_details}
-
+            # Construct stop loss order details
+            distance = self._check_precision(order.instrument, distance)
+            SL_details = {"distance": str(distance), "type": "TRAILING_STOP_LOSS"}
         else:
-            stop_loss_order = {}
+            SL_type = "stopLossOnFill"
+            SL_details = {"price": str(price)}
 
-        return stop_loss_order
+        return {SL_type: SL_details}
 
     def _get_take_profit_details(self, order: Order) -> dict:
         """Constructs take profit details dictionary."""
         self._check_connection()
         if order.take_profit is not None:
             price = self._check_precision(order.instrument, order.take_profit)
-            take_profit_details = {"price": str(price)}
+            return {"price": str(price)}
         else:
-            take_profit_details = None
-
-        return take_profit_details
+            return None
 
     def _check_response(self, response):
         """Checks API response (currently only for placing orders)."""
@@ -758,9 +691,7 @@ class Broker(AbstractBroker):
         else:
             message = "Success."
 
-        output = {"Status": response.status, "Message": message}
-        # TODO - print errors
-        return output
+        return {"Status": response.status, "Message": message}
 
     def _close_position(self, instrument, long_units=None, short_units=None, **kwargs):
         """Closes all open positions on an instrument."""
@@ -814,19 +745,16 @@ class Broker(AbstractBroker):
         response = self.api.account.instruments(
             accountID=self.ACCOUNT_ID, instruments=instrument
         )
-        precision = response.body["instruments"][0].displayPrecision
-        return precision
+        return response.body["instruments"][0].displayPrecision
 
     def _check_precision(self, instrument, price):
         """Modify a price based on required ordering precision for pair."""
         N = self._get_precision(instrument)
-        corrected_price = round(price, N)
-        return corrected_price
+        return round(price, N)
 
     def _get_order_book(self, instrument: str):
         """Returns the order book of the instrument specified."""
-        orderbook = self.autodata.L2(instrument=instrument)
-        return orderbook
+        return self.autodata.L2(instrument=instrument)
 
     def _get_position_book(self, instrument: str):
         """Returns the position book of the instrument specified."""

@@ -64,5 +64,4 @@ class TestIndicators:
         home_dir = os.path.abspath(os.path.dirname(__file__))
         data_dir = os.path.join(home_dir, "data", "EUR_USD_H4.csv")
         data = pd.read_csv(data_dir, index_col=0, parse_dates=True)
-        testdata = data.iloc[-1000:]
-        return testdata
+        return data.iloc[-1000:]

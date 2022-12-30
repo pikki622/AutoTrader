@@ -234,11 +234,10 @@ class AutoData:
         """
         func = getattr(self, f"_{self._feed}")
         if isinstance(instrument, list):
-            max_workers = kwargs["workers"] if "workers" in kwargs else None
+            max_workers = kwargs.get("workers")
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {}
-                for i in instrument:
-                    futures[i] = executor.submit(
+                futures = {
+                    i: executor.submit(
                         func,
                         instrument=i,
                         granularity=granularity,
@@ -248,6 +247,8 @@ class AutoData:
                         *args,
                         **kwargs,
                     )
+                    for i in instrument
+                }
             data = {}
             for instrument, future in futures.items():
                 try:
@@ -272,38 +273,29 @@ class AutoData:
     def _quote(self, *args, **kwargs):
         """Unified quote data retrieval api."""
         func = getattr(self, f"_{self._feed}_quote_data")
-        data = func(*args, **kwargs)
-        return data
+        return func(*args, **kwargs)
 
     def L1(self, instrument=None, *args, **kwargs):
         """Unified level 1 data retrieval api."""
         # Get orderbook
         orderbook = self.L2(instrument, *args, **kwargs)
 
-        # Construct response
-        response = {
+        return {
             "bid": orderbook.bids["price"][0],
             "ask": orderbook.asks["price"][0],
             "bid_size": orderbook.bids["size"][0],
             "ask_size": orderbook.asks["size"][0],
         }
 
-        return response
-
     def L2(self, instrument=None, *args, **kwargs):
         """Unified level 2 data retrieval api."""
         func = getattr(self, f"_{self._feed}_orderbook")
         data = func(instrument, *args, **kwargs)
-        if self._feed == "local":
-            book = data
-        else:
-            book = OrderBook(instrument, data)
-        return book
+        return data if self._feed == "local" else OrderBook(instrument, data)
 
     def trades(self, instrument, *args, **kwargs):
         func = getattr(self, f"_{self._feed}_trades")
-        trades = func(instrument, *args, **kwargs)
-        return trades
+        return func(instrument, *args, **kwargs)
 
     def _oanda(
         self,
@@ -366,75 +358,52 @@ class AutoData:
         }
         granularity = gran_map[pd.Timedelta(granularity).total_seconds()]
 
-        if count is not None:
-            # either of count, start_time+count, end_time+count (or start_time+end_time+count)
-            # if count is provided, count must be less than 5000
-            if start_time is None and end_time is None:
-                # fetch count=N most recent candles
-                response = self.api.instrument.candles(
-                    instrument, granularity=granularity, count=count
-                )
-                data = self._response_to_df(response)
+        if count is not None and start_time is None and end_time is None:
+            # fetch count=N most recent candles
+            response = self.api.instrument.candles(
+                instrument, granularity=granularity, count=count
+            )
+            return self._response_to_df(response)
 
-            elif start_time is not None and end_time is None:
-                # start_time + count
-                from_time = start_time.timestamp()
-                response = self.api.instrument.candles(
-                    instrument, granularity=granularity, count=count, fromTime=from_time
-                )
-                data = self._response_to_df(response)
+        elif count is not None and start_time is not None and end_time is None:
+            # start_time + count
+            from_time = start_time.timestamp()
+            response = self.api.instrument.candles(
+                instrument, granularity=granularity, count=count, fromTime=from_time
+            )
+            return self._response_to_df(response)
 
-            elif end_time is not None and start_time is None:
-                # end_time + count
-                to_time = end_time.timestamp()
-                response = self.api.instrument.candles(
-                    instrument, granularity=granularity, count=count, toTime=to_time
-                )
-                data = self._response_to_df(response)
-
-            else:
-                # start_time+end_time+count
-                # print("Warning: ignoring count input since start_time and",
-                #        "end_time times have been specified.")
-                from_time = start_time.timestamp()
-                to_time = end_time.timestamp()
-
-                # try to get data
-                response = self.api.instrument.candles(
-                    instrument,
-                    granularity=granularity,
-                    fromTime=from_time,
-                    toTime=to_time,
-                )
-
-                # If the request is rejected, max candles likely exceeded
-                if response.status != 200:
-                    data = self._get_extended_oanda_data(
-                        instrument, granularity, from_time, to_time
-                    )
-                else:
-                    data = self._response_to_df(response)
+        elif count is not None and start_time is None:
+            # end_time + count
+            to_time = end_time.timestamp()
+            response = self.api.instrument.candles(
+                instrument, granularity=granularity, count=count, toTime=to_time
+            )
+            return self._response_to_df(response)
 
         else:
-            # count is None
-            # Assume that both start_time and end_time have been specified.
+            # start_time+end_time+count
+            # print("Warning: ignoring count input since start_time and",
+            #        "end_time times have been specified.")
             from_time = start_time.timestamp()
             to_time = end_time.timestamp()
 
             # try to get data
             response = self.api.instrument.candles(
-                instrument, granularity=granularity, fromTime=from_time, toTime=to_time
+                instrument,
+                granularity=granularity,
+                fromTime=from_time,
+                toTime=to_time,
             )
 
-            # If the request is rejected, max candles likely exceeded
-            if response.status != 200:
-                data = self._get_extended_oanda_data(
+                # If the request is rejected, max candles likely exceeded
+            return (
+                self._get_extended_oanda_data(
                     instrument, granularity, from_time, to_time
                 )
-            else:
-                data = self._response_to_df(response)
-
-        return data
+                if response.status != 200
+                else self._response_to_df(response)
+            )
 
     def _oanda_liveprice(self, order: Order, **kwargs) -> dict:
         """Returns current price (bid+ask) and home conversion factors."""
@@ -450,14 +419,12 @@ class AutoData:
             0
         ].quoteHomeConversionFactors.positiveUnits
 
-        price = {
+        return {
             "ask": ask,
             "bid": bid,
             "negativeHCF": negativeHCF,
             "positiveHCF": positiveHCF,
         }
-
-        return price
 
     def _oanda_orderbook(self, instrument, time=None, *args, **kwargs):
         """Returns the orderbook from Oanda."""
@@ -543,7 +510,6 @@ class AutoData:
         }
         granularity = gran_map[pd.Timedelta(granularity).total_seconds()]
 
-        base_currency = pair[:3]
         quote_currency = pair[-3:]
 
         if self._home_currency is None or quote_currency == self._home_currency:
@@ -551,6 +517,7 @@ class AutoData:
             quote_data = data
 
         else:
+            base_currency = pair[:3]
             if self._home_currency == base_currency:
                 # Disturb the data by machine precision to prompt HCF calculation
                 quote_data = (1 + 1e-15) * data
@@ -613,26 +580,18 @@ class AutoData:
         times = []
         close_price, high_price, low_price, open_price, volume = [], [], [], [], []
 
-        if self._allow_dancing_bears:
-            # Allow all candles
-            for candle in candles:
+        for candle in candles:
+            if (
+                not self._allow_dancing_bears
+                and candle.complete
+                or self._allow_dancing_bears
+            ):
                 times.append(candle.time)
                 close_price.append(float(candle.mid.c))
                 high_price.append(float(candle.mid.h))
                 low_price.append(float(candle.mid.l))
                 open_price.append(float(candle.mid.o))
                 volume.append(float(candle.volume))
-
-        else:
-            # Only allow complete candles
-            for candle in candles:
-                if candle.complete:
-                    times.append(candle.time)
-                    close_price.append(float(candle.mid.c))
-                    high_price.append(float(candle.mid.h))
-                    low_price.append(float(candle.mid.l))
-                    open_price.append(float(candle.mid.o))
-                    volume.append(float(candle.volume))
 
         dataframe = pd.DataFrame(
             {
@@ -683,11 +642,7 @@ class AutoData:
 
             letter = granularity[0]
 
-            if len(granularity) > 1:
-                number = float(granularity[1:])
-            else:
-                number = 1
-
+            number = float(granularity[1:]) if len(granularity) > 1 else 1
             conversions = {"S": 1, "M": 60, "H": 60 * 60, "D": 60 * 60 * 24}
 
             my_int = conversions[letter] * number
@@ -860,30 +815,6 @@ class AutoData:
         raise NotImplementedError(
             "Historical market data from IB is not yet supported."
         )
-        # TODO - implement
-        contract = IB_Utils.build_contract(order)
-
-        dt = ""
-        barsList = []
-        while True:
-            bars = self.api.reqHistoricalData(
-                contract,
-                endDateTime=dt,
-                durationStr=durationStr,
-                barSizeSetting=granularity,
-                whatToShow="MIDPOINT",
-                useRTH=True,
-                formatDate=1,
-            )
-            if not bars:
-                break
-            barsList.append(bars)
-            dt = bars[0].date
-
-        # Convert bars to DataFrame
-        allBars = [b for bars in reversed(barsList) for b in bars]
-        df = self.api.util.df(allBars)
-        return df
 
     def _ib_liveprice(self, order: Order, snapshot: bool = False, **kwargs) -> dict:
         """Returns current price (bid+ask) and home conversion factors.
@@ -907,13 +838,12 @@ class AutoData:
         while ticker.last != ticker.last:
             self.api.sleep(1)
         self.api.cancelMktData(contract)
-        price = {
+        return {
             "ask": ticker.ask,
             "bid": ticker.bid,
             "negativeHCF": 1,
             "positiveHCF": 1,
         }
-        return price
 
     @staticmethod
     def _pseduo_liveprice(last: float, quote_price: float = None) -> dict:
@@ -935,30 +865,21 @@ class AutoData:
 
         """
         # TODO - build bid/ask spread into here, review virtual broker
-        if quote_price is not None:
-            # Use quote price to determine HCF
-            if last == quote_price:
-                # Quote currency matches account home currency
-                negativeHCF = 1
-                positiveHCF = 1
-            else:
-                # Quote data
-                negativeHCF = 1 / quote_price
-                positiveHCF = 1 / quote_price
-
-        else:
-            # No quote price provided
+        if quote_price is not None and last == quote_price or quote_price is None:
+            # Quote currency matches account home currency
             negativeHCF = 1
             positiveHCF = 1
+        else:
+            # Quote data
+            negativeHCF = 1 / quote_price
+            positiveHCF = 1 / quote_price
 
-        price = {
+        return {
             "ask": last,
             "bid": last,
             "negativeHCF": negativeHCF,
             "positiveHCF": positiveHCF,
         }
-
-        return price
 
     def _local(
         self,
@@ -1022,10 +943,8 @@ class AutoData:
         midprice : float, optional
             The midprice to use as a reference price.
         """
-        spread_units = (
-            kwargs["spread_units"] if "spread_units" in kwargs else self._spread_units
-        )
-        spread = kwargs["spread"] if "spread" in kwargs else self._spread
+        spread_units = kwargs.get("spread_units", self._spread_units)
+        spread = kwargs.get("spread", self._spread)
 
         # Get latest price
         if "midprice" in kwargs:
@@ -1035,13 +954,13 @@ class AutoData:
             data = self._local(instrument)
             midprice = data.iloc[-1].Close
 
-        if spread_units == "price":
-            bid = midprice - 0.5 * spread
-            ask = midprice + 0.5 * spread
-        elif spread_units == "percentage":
+        if spread_units == "percentage":
             bid = midprice * (1 - 0.5 * spread / 100)
             ask = midprice * (1 + 0.5 * spread / 100)
 
+        elif spread_units == "price":
+            bid = midprice - 0.5 * spread
+            ask = midprice + 0.5 * spread
         # Quantize
         bid = Decimal(bid).quantize(Decimal(str(midprice)))
         ask = Decimal(ask).quantize(Decimal(str(midprice)))
@@ -1055,9 +974,7 @@ class AutoData:
                 {"price": ask, "size": 1e100},
             ],
         }
-        orderbook = OrderBook(instrument, data)
-
-        return orderbook
+        return OrderBook(instrument, data)
 
     def _local_quote_data(
         self,
@@ -1252,12 +1169,11 @@ class AutoData:
         """Returns the current funding rate."""
         response = self.api.fetchFundingRate(instrument)
 
-        fr_dict = {
+        return {
             "symbol": instrument,
             "rate": response["fundingRate"],
             "time": response["fundingDatetime"],
         }
-        return fr_dict
 
     def _ccxt_funding_history(
         self,
@@ -1502,8 +1418,7 @@ class AutoData:
     def _dydx_orderbook(self, instrument, *args, **kwargs):
         """Returns the orderbook from dYdX."""
         response = self.api.public.get_orderbook(market=instrument)
-        orderbook = response.data
-        return orderbook
+        return response.data
 
     def _dydx_trades(self, instrument):
         """Returns public trades from dYdX."""

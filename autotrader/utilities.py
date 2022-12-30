@@ -77,6 +77,7 @@ def get_broker_config(
         except:
             pass
 
+    supported_brokers = ["oanda", "ib", "ccxt", "dydx", "virtual"]
     for broker in inputted_brokers:
         # Check for CCXT
         if broker.split(":")[0].lower() == "ccxt":
@@ -88,7 +89,6 @@ def get_broker_config(
         else:
             broker_key = broker
 
-        supported_brokers = ["oanda", "ib", "ccxt", "dydx", "virtual"]
         if broker.lower() not in supported_brokers:
             raise Exception(f"Unsupported broker: '{broker}'")
 
@@ -180,7 +180,7 @@ def get_broker_config(
                     if "base_currency" in config_data
                     else "USDT"
                 )
-                sandbox_mode = False if environment.lower() == "live" else True
+                sandbox_mode = environment.lower() != "live"
                 config = {
                     "data_source": "ccxt",
                     "exchange": exchange,
@@ -191,11 +191,7 @@ def get_broker_config(
                 }
                 other_args = {"options": {}, "password": None}
                 for key, default_val in other_args.items():
-                    if key in config_data:
-                        config[key] = config_data[key]
-                    else:
-                        config[key] = default_val
-
+                    config[key] = config_data[key] if key in config_data else default_val
             except KeyError:
                 raise Exception(
                     "Using CCXT for trading requires authentication via "
@@ -264,7 +260,7 @@ def get_data_config(feed: str, global_config: dict = None, **kwargs) -> dict:
     config = {"data_source": feed.lower()}
 
     if feed.lower() == "oanda":
-        environment = kwargs["environment"] if "environment" in kwargs else "paper"
+        environment = kwargs.get("environment", "paper")
         api_key = "LIVE" if environment.lower() == "live" else "PRACTICE"
         oanda_conf = global_config["OANDA"]
 
@@ -313,9 +309,7 @@ def get_data_config(feed: str, global_config: dict = None, **kwargs) -> dict:
             # Global config is available
             try:
                 # Try get api keys
-                environment = (
-                    kwargs["environment"] if "environment" in kwargs else "paper"
-                )
+                environment = kwargs.get("environment", "paper")
                 config = get_broker_config(
                     broker=f"{feed.lower()}:{exchange}",
                     global_config=global_config,
@@ -420,13 +414,11 @@ class TradeAnalysis:
         instrument: str = None,
     ) -> None:
         """Analyses trade account and creates summary of key details."""
-        if not isinstance(broker, dict):
-            # Single broker - create dummy dict
-            broker_instances = {list(broker_histories.keys())[0]: broker}
-        else:
-            # Multiple brokers passed in as dict
-            broker_instances = broker
-
+        broker_instances = (
+            broker
+            if isinstance(broker, dict)
+            else {list(broker_histories.keys())[0]: broker}
+        )
         # Process results from each broker instance
         broker_results = {}
         for broker_name, broker in broker_instances.items():
@@ -434,7 +426,7 @@ class TradeAnalysis:
             all_orders = {}
             for status in ["pending", "open", "filled", "cancelled"]:
                 orders = broker.get_orders(order_status=status)
-                all_orders.update(orders)
+                all_orders |= orders
 
             orders = TradeAnalysis.create_trade_summary(
                 orders=all_orders, instrument=instrument, broker_name=broker_name
@@ -518,8 +510,7 @@ class TradeAnalysis:
             # Save result
             position_histories_dict[instrument] = net_position_hist
 
-        position_histories = pd.concat(position_histories_dict, axis=1)
-        return position_histories
+        return pd.concat(position_histories_dict, axis=1)
 
     @staticmethod
     def _create_position_summary(open_positions, closed_positions):
@@ -552,7 +543,7 @@ class TradeAnalysis:
                 "no_long": directions.count(1),
                 "no_short": directions.count(-1),
             }
-            if len(durations) > 0:
+            if durations:
                 closed_positions_summary[instrument]["avg_duration"] = np.mean(
                     durations
                 )
@@ -569,12 +560,9 @@ class TradeAnalysis:
                 else:
                     closed_positions_summary[instrument]["avg_short_duration"] = None
 
-        # Create summary dataframe
-        summary = pd.DataFrame(
+        return pd.DataFrame(
             data=closed_positions_summary,
         )
-
-        return summary
 
     def _aggregate_across_brokers(self, broker_results):
         """Aggregates trading history across all broker instances."""
@@ -685,11 +673,7 @@ class TradeAnalysis:
         """Creates a summary dataframe for trades and orders."""
         instrument = None if isinstance(instrument, list) else instrument
 
-        if trades is not None:
-            iter_dict = trades
-        else:
-            iter_dict = orders
-
+        iter_dict = trades if trades is not None else orders
         iter_dict = {} if iter_dict is None else iter_dict
 
         product = []
@@ -713,7 +697,7 @@ class TradeAnalysis:
             trade_duration = []
             fees = []
 
-        for ID, item in iter_dict.items():
+        for item in iter_dict.values():
             product.append(item.instrument)
             status.append(item.status)
             ids.append(item.id)
@@ -726,7 +710,7 @@ class TradeAnalysis:
             reason.append(item.reason)
 
         if trades is not None:
-            for trade_id, trade in iter_dict.items():
+            for trade in iter_dict.values():
                 entry_time.append(trade.time_filled)
                 fill_price.append(trade.fill_price)
                 profit.append(trade.profit)
@@ -1146,26 +1130,24 @@ class DataStream:
             multi_data = {}
             data_func = getattr(self.get_data, f"_{self.feed.lower()}")
             if self.portfolio:
-                # Portfolio strategy
-                if len(self.portfolio) > 1:
-                    granularity = self.strategy_params["granularity"]
-                    data_key = self.portfolio[0]
-                    for instrument in self.portfolio:
-                        data = data_func(
-                            instrument,
-                            granularity=granularity,
-                            count=self.strategy_params["period"],
-                            start_time=self.data_start,
-                            end_time=self.data_end,
-                        )
-                        multi_data[instrument] = data
-                else:
+                if len(self.portfolio) <= 1:
                     raise Exception(
                         "Portfolio strategies require more "
                         + "than a single instrument. Please set "
                         + "portfolio to False, or specify more "
                         + "instruments in the watchlist."
                     )
+                granularity = self.strategy_params["granularity"]
+                data_key = self.portfolio[0]
+                for instrument in self.portfolio:
+                    data = data_func(
+                        instrument,
+                        granularity=granularity,
+                        count=self.strategy_params["period"],
+                        start_time=self.data_start,
+                        end_time=self.data_end,
+                    )
+                    multi_data[instrument] = data
             else:
                 # Single instrument strategy
                 granularities = self.strategy_params["granularity"].split(",")
@@ -1187,30 +1169,7 @@ class DataStream:
                 multi_data = None
 
         # Retrieve quote data
-        if self.quote_data_file is not None:
-            if isinstance(self.quote_data_file, str):
-                # Single quote datafile
-                quote_data = self.get_data._local(
-                    self.quote_data_file, self.data_start, self.data_end
-                )
-
-            elif isinstance(quote_data, dict) and self.portfolio:
-                # Multiple quote datafiles provided
-                # TODO - support multiple quote data files (portfolio strategies)
-                raise NotImplementedError(
-                    "Locally-provided quote data not " + "implemented for portfolios."
-                )
-                quote_data = {}
-                for instrument, path in quote_data.items():
-                    quote_data[instrument] = self.get_data._local(
-                        self.quote_data_file,  # need to specify
-                        self.data_start,
-                        self.data_end,
-                    )
-            else:
-                raise Exception("Error in quote data file provided.")
-
-        else:
+        if self.quote_data_file is None:
             # Download data
             quote_data_func = getattr(self.get_data, f"_{self.feed.lower()}_quote_data")
             if self.portfolio:
@@ -1239,25 +1198,39 @@ class DataStream:
                     count=self.strategy_params["period"],
                 )
 
-        # Retrieve auxiliary data
-        if self.auxdata_files is not None:
-            if isinstance(self.auxdata_files, str):
-                # Single data filepath provided
-                auxdata = self.get_data._local(
-                    self.auxdata_files, self.data_start, self.data_end
-                )
+        elif isinstance(self.quote_data_file, str):
+            # Single quote datafile
+            quote_data = self.get_data._local(
+                self.quote_data_file, self.data_start, self.data_end
+            )
 
-            elif isinstance(self.auxdata_files, dict):
-                # Multiple data filepaths provided
-                auxdata = {}
-                for key, filepath in self.auxdata_files.items():
-                    data = self.get_data._local(
-                        filepath, self.data_start, self.data_end
-                    )
-                    auxdata[key] = data
+        elif isinstance(quote_data, dict) and self.portfolio:
+            # Multiple quote datafiles provided
+            # TODO - support multiple quote data files (portfolio strategies)
+            raise NotImplementedError(
+                "Locally-provided quote data not " + "implemented for portfolios."
+            )
         else:
+            raise Exception("Error in quote data file provided.")
+
+        # Retrieve auxiliary data
+        if self.auxdata_files is None:
             auxdata = None
 
+        elif isinstance(self.auxdata_files, str):
+            # Single data filepath provided
+            auxdata = self.get_data._local(
+                self.auxdata_files, self.data_start, self.data_end
+            )
+
+        elif isinstance(self.auxdata_files, dict):
+            # Multiple data filepaths provided
+            auxdata = {}
+            for key, filepath in self.auxdata_files.items():
+                data = self.get_data._local(
+                    filepath, self.data_start, self.data_end
+                )
+                auxdata[key] = data
         # Correct any data mismatches
         if self.portfolio:
             # Portfolio strategy
@@ -1267,11 +1240,9 @@ class DataStream:
                 )
                 multi_data[instrument] = matched_data
                 quote_data[instrument] = matched_quote_data
-        else:
-            # Single instrument data strategy
-            if data is not None:
-                # Data is not None (in case of 'none' data feed)
-                data, quote_data = self.match_quote_data(data, quote_data)
+        elif data is not None:
+            # Data is not None (in case of 'none' data feed)
+            data, quote_data = self.match_quote_data(data, quote_data)
 
         return data, multi_data, quote_data, auxdata
 
@@ -1332,11 +1303,7 @@ class DataStream:
         case a distinction must be made when this method is called.
         """
         bars = {}
-        strat_data = (
-            processed_strategy_data["base"]
-            if "base" in processed_strategy_data
-            else processed_strategy_data
-        )
+        strat_data = processed_strategy_data.get("base", processed_strategy_data)
         if isinstance(strat_data, dict):
             for instrument, data in strat_data.items():
                 bars[instrument] = data.iloc[-1]

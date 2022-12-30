@@ -34,16 +34,12 @@ class Utils(BrokerUtils):
         else:
             message = "Success."
 
-        output = {"Status": response.status, "Message": message}
-
-        return output
+        return {"Status": response.status, "Message": message}
 
     def check_precision(self, pair, price):
         """Modify a price based on required ordering precision for pair."""
         N = self.get_precision(pair)
-        corrected_price = round(price, N)
-
-        return corrected_price
+        return round(price, N)
 
     def get_precision(self, pair):
         """Returns the allowable precision for a given pair"""
@@ -52,9 +48,7 @@ class Utils(BrokerUtils):
             accountID=self.ACCOUNT_ID, instruments=pair
         )
 
-        precision = response.body["instruments"][0].displayPrecision
-
-        return precision
+        return response.body["instruments"][0].displayPrecision
 
     def check_trade_size(self, pair, units):
         """Checks the requested trade size against the minimum trade size
@@ -78,8 +72,8 @@ class Utils(BrokerUtils):
 
         if security_type == "Stock":
             # symbol='', exchange='', currency=''
-            exchange = order.exchange if order.exchange else "SMART"
-            currency = order.currency if order.currency else "USD"
+            exchange = order.exchange or "SMART"
+            currency = order.currency or "USD"
             contract = contract_object(
                 symbol=instrument, exchange=exchange, currency=currency
             )
@@ -91,10 +85,10 @@ class Utils(BrokerUtils):
 
         elif security_type == "Future":
             # Requires order_details{'instrument', 'exchange', 'contract_month'}
-            exchange = order.exchange if order.exchange else "GLOBEX"
-            currency = order.currency if order.currency else "USD"
+            exchange = order.exchange or "GLOBEX"
+            currency = order.currency or "USD"
             contract_month = order.contract_month
-            local_symbol = order.localSymbol if order.localSymbol else ""
+            local_symbol = order.localSymbol or ""
             contract = contract_object(
                 symbol=instrument,
                 exchange=exchange,
@@ -110,7 +104,7 @@ class Utils(BrokerUtils):
 
         elif security_type == "Forex":
             # pair='', exchange='IDEALPRO', symbol='', currency='', **kwargs)
-            exchange = order.exchange if order.exchange else "IDEALPRO"
+            exchange = order.exchange or "IDEALPRO"
             contract = contract_object(pair=instrument, exchange=exchange)
 
         elif security_type == "Index":
@@ -120,8 +114,8 @@ class Utils(BrokerUtils):
 
         elif security_type == "CFD":
             # symbol='', exchange='', currency='',
-            exchange = order.exchange if order.exchange else "SMART"
-            currency = order.currency if order.currency else "USD"
+            exchange = order.exchange or "SMART"
+            currency = order.currency or "USD"
             contract = contract_object(
                 symbol=instrument, exchange=exchange, currency=currency
             )
@@ -177,16 +171,15 @@ class Utils(BrokerUtils):
         if account is None:
             account = "All"
 
-        out = {}
-        for av in data:
-            if av.account == account:
-                out[av.tag] = {
-                    "value": av.value,
-                    "currency": av.currency,
-                    "modelCode": av.modelCode,
-                }
-
-        return out
+        return {
+            av.tag: {
+                "value": av.value,
+                "currency": av.currency,
+                "modelCode": av.modelCode,
+            }
+            for av in data
+            if av.account == account
+        }
 
     @staticmethod
     def positionlist_to_dict(positions: list) -> dict:

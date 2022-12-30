@@ -173,9 +173,7 @@ class AutoPlot:
             if bottom_fig_height is not None
             else self._bottom_fig_height
         )
-        self._jupyter_notebook = (
-            jupyter_notebook if jupyter_notebook is not None else jupyter_notebook
-        )
+        self._jupyter_notebook = jupyter_notebook
         self._show_cancelled = (
             show_cancelled if show_cancelled is not None else self._show_cancelled
         )
@@ -266,7 +264,7 @@ class AutoPlot:
         if trade_results is None:
             # Using Indiview
             if instrument is not None:
-                title_string = "AutoTrader IndiView - {}".format(instrument)
+                title_string = f"AutoTrader IndiView - {instrument}"
             else:
                 title_string = "AutoTrader IndiView"
             output_file("indiview-chart.html", title=title_string)
@@ -471,9 +469,8 @@ class AutoPlot:
             data: the data to be merged
             name: the desired column name of the merged data
         """
-        if isinstance(data, pd.Series):
-            if data.name is None:
-                data.name = "name"
+        if isinstance(data, pd.Series) and data.name is None:
+            data.name = "name"
 
         merged_data = pd.merge(
             self._data, data, left_on="date", right_index=True
@@ -510,14 +507,14 @@ class AutoPlot:
         source_key = "bot_source_1"
         while not added:
             if range_key not in self.autoscale_args:
-                # Keys can be added
-                if source.data["plot_data"].max() == source.data["plot_data"].min():
-                    # Do not need to autoscale this data
-                    added = True
-                else:
+                if (
+                    source.data["plot_data"].max()
+                    != source.data["plot_data"].min()
+                ):
                     self.autoscale_args[range_key] = y_range
                     self.autoscale_args[source_key] = source
-                    added = True
+                # Do not need to autoscale this data
+                added = True
             else:
                 # Increment key
                 range_key = range_key[:-1] + str(int(range_key[-1]) + 1)

@@ -16,15 +16,11 @@ class Strategy:
     def generate_signal(self, data):
         """Define strategy logic to transform data into trading signals."""
 
-        # Initialise empty order list
-        orders = []
-
         # The data passed into this method is the most up-to-date data.
 
         # Example long market order:
         long_market_order = Order(direction=1)
-        orders.append(long_market_order)
-
+        orders = [long_market_order]
         # Example short limit order:
         short_limit = Order(direction=-1, order_type="limit", order_limit_price=1.0221)
         orders.append(short_limit)

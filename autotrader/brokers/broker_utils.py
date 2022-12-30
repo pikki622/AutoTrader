@@ -42,7 +42,7 @@ class BrokerUtils:
 
     def truncate(self, f: float, n: int):
         """Truncates a float f to n decimal places without rounding."""
-        s = "{}".format(f)
+        s = f"{f}"
 
         if "e" in s or "E" in s:
             return "{0:.{1}f}".format(f, n)
@@ -56,12 +56,7 @@ class BrokerUtils:
         by the stop loss price (rather than a distance) to avoid
         unexpected results.
         """
-        if "JPY" in pair:
-            pip_value = 1e-2
-        else:
-            pip_value = 1e-4
-
-        return pip_value
+        return 1e-2 if "JPY" in pair else 1e-4
 
     def get_size(
         self,
@@ -75,33 +70,22 @@ class BrokerUtils:
         """Calculate position size based on account balance and risk profile."""
         if stop_price is None and stop_distance is None:
             # No stop loss being used, instead risk portion of account
-            units = amount_risked / (HCF * price)
+            return amount_risked / (HCF * price)
 
+        # SL provided
+        if stop_price is None:
+            # Stop distance provided (assume FX)
+            pip_value = self.get_pip_ratio(instrument)
+            price_distance = stop_distance * pip_value
         else:
-            # SL provided
-            if stop_price is None:
-                # Stop distance provided (assume FX)
-                pip_value = self.get_pip_ratio(instrument)
-                price_distance = stop_distance * pip_value
-            else:
-                price_distance = abs(price - stop_price)
+            price_distance = abs(price - stop_price)
 
             # Calculate units
-            if price_distance == 0:
-                units = 0
-            else:
-                quote_risk = amount_risked / HCF
-                units = quote_risk / price_distance
-
-        return units
+        return 0 if price_distance == 0 else amount_risked / HCF / price_distance
 
     def check_precision(self, pair, original_stop, original_take):
         """Modify stop/take based on pair for required ordering precision."""
-        if pair[-3:] == "JPY":
-            N = 3
-        else:
-            N = 5
-
+        N = 3 if pair[-3:] == "JPY" else 5
         take_price = float(self.truncate(original_take, N))
         stop_price = float(self.truncate(original_stop, N))
 
@@ -111,28 +95,20 @@ class BrokerUtils:
         """Converts the interval to time in seconds."""
         letter = interval[0]
 
-        if len(interval) > 1:
-            number = float(interval[1:])
-        else:
-            number = 1
-
+        number = float(interval[1:]) if len(interval) > 1 else 1
         conversions = {"S": 1, "M": 60, "H": 60 * 60, "D": 60 * 60 * 24}
 
-        my_int = conversions[letter] * number
-
-        return my_int
+        return conversions[letter] * number
 
     def write_to_order_summary(self, order, filepath: str):
         """Writes order details to summary file."""
         # Check if file exists already, if not, create
         if not os.path.exists(filepath):
-            f = open(filepath, "w")
-            f.write(
-                "order time, strategy, granularity, order_type, instrument, order_size, "
-            )
-            f.write("trigger_price, stop_loss, take_profit\n")
-            f.close()
-
+            with open(filepath, "w") as f:
+                f.write(
+                    "order time, strategy, granularity, order_type, instrument, order_size, "
+                )
+                f.write("trigger_price, stop_loss, take_profit\n")
         order_time = order.order_time
         strategy = order.strategy
         order_type = order.order_type
@@ -143,21 +119,10 @@ class BrokerUtils:
         take_profit = order.take_profit
         granularity = order.granularity
 
-        f = open(filepath, "a")
-        f.write(
-            "{}, {}, {}, {}, {}, {}, {}, {}, {}\n".format(
-                order_time,
-                strategy,
-                granularity,
-                order_type,
-                instrument,
-                size,
-                trigger_price,
-                stop_loss,
-                take_profit,
+        with open(filepath, "a") as f:
+            f.write(
+                f"{order_time}, {strategy}, {granularity}, {order_type}, {instrument}, {size}, {trigger_price}, {stop_loss}, {take_profit}\n"
             )
-        )
-        f.close()
 
     def check_dataframes(self, df_1: pd.DataFrame, df_2: pd.DataFrame):
         """Checks dataframe lengths and corrects if necessary."""
