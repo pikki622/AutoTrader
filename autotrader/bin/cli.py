@@ -98,17 +98,17 @@ def init(strategies, demo, name):
         # Strategy directory doesn't exist - create it
         os.mkdir(strategy_dir)
 
-    # Add strategies
-    valid_args = [
-        "config",
-        "template",
-        "macd",
-        "ema_crossover",
-        "long_ema_crossover",
-        "supertrend",
-        "rebalance",
-    ]
     if strategies is not None:
+        # Add strategies
+        valid_args = [
+            "config",
+            "template",
+            "macd",
+            "ema_crossover",
+            "long_ema_crossover",
+            "supertrend",
+            "rebalance",
+        ]
         for strategy in strategies.replace(" ", "").split(","):
             strategy = strategy.lower()
 
@@ -117,20 +117,20 @@ def init(strategies, demo, name):
                 raise Exception(f"{strategy} is not a valid argument.")
 
             # Construct urls
-            if strategy == "template":
-                # Get strategy template from main repo
-                urls = {
-                    "strategies": "https://raw.githubusercontent.com/"
-                    + "kieran-mackle/AutoTrader/main/templates/strategy.py",
-                    "config": None,
-                }
-
-            elif strategy == "config":
+            if strategy == "config":
                 # Get strategy config file
                 urls = {
                     "strategies": None,
                     "config": "https://raw.githubusercontent.com/"
                     + "kieran-mackle/AutoTrader/main/templates/strategy_config.yaml",
+                }
+
+            elif strategy == "template":
+                # Get strategy template from main repo
+                urls = {
+                    "strategies": "https://raw.githubusercontent.com/"
+                    + "kieran-mackle/AutoTrader/main/templates/strategy.py",
+                    "config": None,
                 }
 
             else:

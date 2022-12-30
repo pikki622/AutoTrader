@@ -43,13 +43,13 @@ class Broker(AbstractBroker):
         """
         self.utils = utils if utils is not None else Utils()
 
-        self.host = config["host"] if "host" in config else "127.0.0.1"
-        self.port = config["port"] if "port" in config else 7497
+        self.host = config.get("host", "127.0.0.1")
+        self.port = config.get("port", 7497)
         self.client_id = (
             config["clientID"] if "clientID" in config else random.randint(0, 9999)
         )
-        self.read_only = config["read_only"] if "read_only" in config else False
-        self.account = config["account"] if "account" in config else ""
+        self.read_only = config.get("read_only", False)
+        self.account = config.get("account", "")
 
         self.ib = ib_insync.IB()
         self._check_connection()
@@ -133,25 +133,25 @@ class Broker(AbstractBroker):
 
             if order_status in ib_insync.OrderStatus.ActiveStates:
                 # Order is still active (not yet filled)
-                new_order = {}
-                new_order["order_ID"] = order_dict["orderId"]
-                new_order["order_type"] = order_dict["orderType"]
-                new_order["order_stop_price"] = order_dict["auxPrice"]
-                new_order["order_limit_price"] = order_dict["lmtPrice"]
-                new_order["direction"] = 1 if order_dict["action"] == "BUY" else -1
-                new_order["order_time"] = None
-                new_order["instrument"] = contract.symbol
-                new_order["size"] = order_dict["totalQuantity"]
-                new_order["order_price"] = None
-                new_order["take_profit"] = None
-                new_order["take_distance"] = None
-                new_order["stop_type"] = None
-                new_order["stop_distance"] = None
-                new_order["stop_loss"] = None
-                new_order["related_orders"] = None
-                new_order["granularity"] = None
-                new_order["strategy"] = None
-
+                new_order = {
+                    "order_ID": order_dict["orderId"],
+                    "order_type": order_dict["orderType"],
+                    "order_stop_price": order_dict["auxPrice"],
+                    "order_limit_price": order_dict["lmtPrice"],
+                    "direction": 1 if order_dict["action"] == "BUY" else -1,
+                    "order_time": None,
+                    "instrument": contract.symbol,
+                    "size": order_dict["totalQuantity"],
+                    "order_price": None,
+                    "take_profit": None,
+                    "take_distance": None,
+                    "stop_type": None,
+                    "stop_distance": None,
+                    "stop_loss": None,
+                    "related_orders": None,
+                    "granularity": None,
+                    "strategy": None,
+                }
                 if instrument is not None and contract.symbol == instrument:
                     pending_orders[new_order["order_ID"]] = Order._from_dict(new_order)
                 elif instrument is None:
@@ -213,26 +213,26 @@ class Broker(AbstractBroker):
 
             if order_status == "Filled":
                 # Trade order has been filled
-                new_trade = {}
-                new_trade["order_ID"] = order_dict["orderId"]
-                new_trade["order_stop_price"] = order_dict["auxPrice"]
-                new_trade["order_limit_price"] = order_dict["lmtPrice"]
-                new_trade["direction"] = 1 if order_dict["action"] == "BUY" else -1
-                new_trade["order_time"] = None
-                new_trade["instrument"] = contract.symbol
-                new_trade["size"] = order_dict["totalQuantity"]
-                new_trade["order_price"] = None
-                new_trade["entry_price"] = order_status_dict["lastFillPrice"]
-                new_trade["order_type"] = None
-                new_trade["take_profit"] = None
-                new_trade["take_distance"] = None
-                new_trade["stop_type"] = None
-                new_trade["stop_distance"] = None
-                new_trade["stop_loss"] = None
-                new_trade["related_orders"] = None
-                new_trade["granularity"] = None
-                new_trade["strategy"] = None
-
+                new_trade = {
+                    "order_ID": order_dict["orderId"],
+                    "order_stop_price": order_dict["auxPrice"],
+                    "order_limit_price": order_dict["lmtPrice"],
+                    "direction": 1 if order_dict["action"] == "BUY" else -1,
+                    "order_time": None,
+                    "instrument": contract.symbol,
+                    "size": order_dict["totalQuantity"],
+                    "order_price": None,
+                    "entry_price": order_status_dict["lastFillPrice"],
+                    "order_type": None,
+                    "take_profit": None,
+                    "take_distance": None,
+                    "stop_type": None,
+                    "stop_distance": None,
+                    "stop_loss": None,
+                    "related_orders": None,
+                    "granularity": None,
+                    "strategy": None,
+                }
                 if instrument is not None and contract.symbol == instrument:
                     open_trades[new_trade["order_ID"]] = IsolatedPosition(new_trade)
                 elif instrument is None:
@@ -352,9 +352,7 @@ class Broker(AbstractBroker):
         """Returns account summary."""
         self._check_connection()
         raw_summary = self.ib.accountSummary(self.account)
-        summary = self.utils.accsum_to_dict(self.account, raw_summary)
-
-        return summary
+        return self.utils.accsum_to_dict(self.account, raw_summary)
 
     def _get_historical_data(
         self, instrument: str, interval: str, from_time: str, to_time: str
@@ -531,11 +529,7 @@ class Broker(AbstractBroker):
 
         # Submit orders
         for i, order in enumerate(orders):
-            if i == len(orders) - 1:
-                # Final order; set transmit to True
-                order.transmit = True
-            else:
-                order.transmit = False
+            order.transmit = i == len(orders) - 1
             self.ib.placeOrder(contract, order)
 
     def _convert_to_oca(
@@ -558,15 +552,14 @@ class Broker(AbstractBroker):
         if oca_group is None:
             oca_group = f"OCA_{self.ib.client.getReqId()}"
 
-        oca_orders = self.ib.oneCancelsAll(orders, oca_group, oca_type)
-        return oca_orders
+        return self.ib.oneCancelsAll(orders, oca_group, oca_type)
 
     def _create_take_profit_order(self, order: Order, parentId: int):
         """Constructs a take profit order."""
         quantity = order.size
         takeProfitPrice = order.take_profit
         action = "BUY" if order.direction < 0 else "SELL"
-        takeProfit_order = ib_insync.LimitOrder(
+        return ib_insync.LimitOrder(
             action,
             quantity,
             takeProfitPrice,
@@ -574,7 +567,6 @@ class Broker(AbstractBroker):
             transmit=False,
             parentId=parentId,
         )
-        return takeProfit_order
 
     def _create_stop_loss_order(self, order: Order, parentId: int):
         """Constructs a stop loss order."""
@@ -582,7 +574,7 @@ class Broker(AbstractBroker):
         quantity = order.size
         stopLossPrice = order.stop_loss
         action = "BUY" if order.direction < 0 else "SELL"
-        stopLoss_order = ib_insync.StopOrder(
+        return ib_insync.StopOrder(
             action,
             quantity,
             stopLossPrice,
@@ -590,4 +582,3 @@ class Broker(AbstractBroker):
             transmit=True,
             parentId=parentId,
         )
-        return stopLoss_order

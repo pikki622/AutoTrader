@@ -314,10 +314,11 @@ class AutoTraderBot:
 
             if not self._scan_mode:
                 # Submit orders
-                if self._max_workers is not None:
-                    workers = min(self._max_workers, len(orders))
-                else:
-                    workers = None
+                workers = (
+                    min(self._max_workers, len(orders))
+                    if self._max_workers is not None
+                    else None
+                )
                 with ThreadPoolExecutor(max_workers=workers) as executor:
                     futures = []
                     for order in orders:
@@ -371,24 +372,25 @@ class AutoTraderBot:
                             + f"{order.size} units placed."
                         )
                         print(order_string)
-                else:
-                    if int(self._verbosity) > 2:
-                        print(
-                            f"{current_time}: No signal detected ({self.instrument})."
-                        )
+                elif int(self._verbosity) > 2:
+                    print(
+                        f"{current_time}: No signal detected ({self.instrument})."
+                    )
 
             # Check for orders placed and/or scan hits
-            if int(self._notify) > 0 and not (self._backtest_mode or self._scan_mode):
+            if (
+                int(self._notify) > 0
+                and not self._backtest_mode
+                and not self._scan_mode
+            ):
                 for order in orders:
                     self._notifier.send_order(order)
 
             # Check scan results
             if self._scan_mode:
-                # Report AutoScan results
                 if int(self._verbosity) > 0 or int(self._notify) == 0:
-                    # Scan reporting with no notifications requested
                     if len(orders) == 0:
-                        print("{}: No signal detected.".format(self.instrument))
+                        print(f"{self.instrument}: No signal detected.")
 
                     else:
                         # Scan detected hits
@@ -401,17 +403,16 @@ class AutoTraderBot:
                     for order in orders:
                         self._notifier.send_message(f"Scan hit: {order}")
 
-        else:
-            if int(self._verbosity) > 1:
-                print(
-                    "\nThe strategy has not been updated as there is either "
-                    + "insufficient data, or no new data. If you believe "
-                    + "this is an error, try setting allow_dancing_bears to "
-                    + "True, or set allow_duplicate_bars to True in "
-                    + "AutoTrader.configure().\n"
-                    + f"Sufficient data: {sufficient_data}\n"
-                    + f"New data: {new_data}"
-                )
+        elif int(self._verbosity) > 1:
+            print(
+                "\nThe strategy has not been updated as there is either "
+                + "insufficient data, or no new data. If you believe "
+                + "this is an error, try setting allow_dancing_bears to "
+                + "True, or set allow_duplicate_bars to True in "
+                + "AutoTrader.configure().\n"
+                + f"Sufficient data: {sufficient_data}\n"
+                + f"New data: {new_data}"
+            )
 
     def _refresh_data(self, timestamp: datetime = None, **kwargs):
         """Refreshes the active Bot's data attributes for trading.
@@ -453,11 +454,7 @@ class AutoTraderBot:
             raise Exception("Error retrieving data.")
 
         # Data assignment
-        if multi_data is None:
-            strat_data = data
-        else:
-            strat_data = multi_data
-
+        strat_data = data if multi_data is None else multi_data
         # Auxiliary data assignment
         if auxdata is not None:
             strat_data = {"base": strat_data, "aux": auxdata}
@@ -537,9 +534,7 @@ class AutoTraderBot:
         def add_strategy_data(orders):
             # Append strategy parameters to each order
             for order in orders:
-                order.instrument = (
-                    self.instrument if not order.instrument else order.instrument
-                )
+                order.instrument = order.instrument or self.instrument
                 order.strategy = (
                     self._strategy.name
                     if "name" in self._strategy.__dict__
@@ -557,11 +552,13 @@ class AutoTraderBot:
                     if order.instrument is not None
                     else self.instrument
                 )
-                if order.order_type in ["market", "limit", "stop-limit", "reduce"]:
-                    if not order.direction:
-                        # Order direction was not provided, delete order
-                        del orders[ix]
-                        continue
+                if (
+                    order.order_type in ["market", "limit", "stop-limit", "reduce"]
+                    and not order.direction
+                ):
+                    # Order direction was not provided, delete order
+                    del orders[ix]
+                    continue
 
                 # Check that an exchange has been specified
                 if order.exchange is None:
@@ -627,18 +624,17 @@ class AutoTraderBot:
                             quote_price=quote_bars[order.data_name].Close,
                         )
 
-                if order.order_type not in ["close", "reduce", "modify"]:
-                    if order.direction < 0:
-                        order_price = last_price["bid"]
-                        HCF = last_price["negativeHCF"]
-                    else:
-                        order_price = last_price["ask"]
-                        HCF = last_price["positiveHCF"]
-                else:
+                if order.order_type in ["close", "reduce", "modify"]:
                     # Close, reduce or modify order type, provide dummy inputs
                     order_price = last_price["ask"]
                     HCF = last_price["positiveHCF"]
 
+                elif order.direction < 0:
+                    order_price = last_price["bid"]
+                    HCF = last_price["negativeHCF"]
+                else:
+                    order_price = last_price["ask"]
+                    HCF = last_price["positiveHCF"]
             else:
                 # Do not provide order price yet
                 order_price = None
@@ -680,8 +676,6 @@ class AutoTraderBot:
         is used. ONLY USED IN BACKTESTING NOW.
         """
         start_range = self._strategy_params["period"]
-        end_range = len(self.data)
-
         if len(self.data) < start_range:
             raise Exception(
                 "There are not enough bars in the data to "
@@ -690,6 +684,8 @@ class AutoTraderBot:
                 + "backtest period, or reduce the PERIOD key of "
                 + "your strategy configuration."
             )
+
+        end_range = len(self.data)
 
         return start_range, end_range
 
@@ -775,15 +771,14 @@ class AutoTraderBot:
         dict
             The checked auxiliary data.
         """
-        processed_auxdata = {}
-        for key, item in auxdata.items():
-            if isinstance(item, pd.DataFrame) or isinstance(item, pd.Series):
-                processed_auxdata[key] = self._check_ohlc_data(
-                    item, timestamp, indexing, tail_bars, check_for_future_data
-                )
-            else:
-                processed_auxdata[key] = item
-        return processed_auxdata
+        return {
+            key: self._check_ohlc_data(
+                item, timestamp, indexing, tail_bars, check_for_future_data
+            )
+            if isinstance(item, (pd.DataFrame, pd.Series))
+            else item
+            for key, item in auxdata.items()
+        }
 
     def _check_data(self, timestamp: datetime, indexing: str = "open") -> dict:
         """Function to return trading data based on the current timestamp. If
@@ -857,9 +852,7 @@ class AutoTraderBot:
                         processed_basedata[granularity] = self._check_ohlc_data(
                             data, timestamp, indexing, no_bars, check_for_future_data
                         )
-                elif isinstance(base_data, pd.DataFrame) or isinstance(
-                    base_data, pd.Series
-                ):
+                elif isinstance(base_data, (pd.DataFrame, pd.Series)):
                     # Base data is a timeseries already, check directly
                     processed_basedata = self._check_ohlc_data(
                         base_data, timestamp, indexing, no_bars, check_for_future_data
@@ -971,11 +964,7 @@ class AutoTraderBot:
                     else:
                         duplicated_bars.append(False)
 
-                if len(duplicated_bars) == sum(duplicated_bars):
-                    new_data = False
-                else:
-                    new_data = True
-
+                new_data = len(duplicated_bars) != sum(duplicated_bars)
             except:
                 new_data = True
 
@@ -1002,12 +991,11 @@ class AutoTraderBot:
         attributes from within a strategy.
         """
         strat_params = self._strategy.__dict__
-        if "plot_data" in strat_params and use_strat_plot_data:
-            plot_data = strat_params["plot_data"]
-        else:
-            plot_data = self.data
-
-        return plot_data
+        return (
+            strat_params["plot_data"]
+            if "plot_data" in strat_params and use_strat_plot_data
+            else self.data
+        )
 
     def _strategy_shutdown(
         self,

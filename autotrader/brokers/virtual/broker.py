@@ -66,10 +66,7 @@ class Broker(AbstractBroker):
 
     def __init__(self, broker_config: dict = None, utils: BrokerUtils = None) -> None:
         """Initialise virtual broker."""
-        if broker_config is not None:
-            self._verbosity = broker_config["verbosity"]
-        else:
-            self._verbosity = 0
+        self._verbosity = 0 if broker_config is None else broker_config["verbosity"]
         self._utils = utils
 
         # Orders
@@ -329,10 +326,12 @@ class Broker(AbstractBroker):
             self._make_deposit(initial_balance)
 
         # Check for pickled state
-        if self._paper_trading and self._picklefile is not None:
-            # Load state
-            if os.path.exists(picklefile):
-                self._load_state()
+        if (
+            self._paper_trading
+            and self._picklefile is not None
+            and os.path.exists(picklefile)
+        ):
+            self._load_state()
 
     def get_NAV(self) -> float:
         """Returns Net Asset Value of account."""
@@ -353,7 +352,7 @@ class Broker(AbstractBroker):
         order(order_time=datetime_stamp)
 
         # Define reference price
-        if order.order_type == "limit" or order.order_type == "stop-limit":
+        if order.order_type in ["limit", "stop-limit"]:
             # Use limit price
             ref_price = order.order_limit_price
 
@@ -370,11 +369,10 @@ class Broker(AbstractBroker):
         # Verify SL price
         invalid_order = False
         if order.stop_loss and order.direction * (ref_price - order.stop_loss) < 0:
-            direction = "long" if order.direction > 0 else "short"
             SL_placement = "below" if order.direction > 0 else "above"
+            direction = "long" if order.direction > 0 else "short"
             reason = (
-                "Invalid stop loss request: stop loss must be "
-                + f"{SL_placement} the order price for a {direction}"
+                f"Invalid stop loss request: stop loss must be {SL_placement} the order price for a {direction}"
                 + " trade order.\n"
                 + f"Order Price: {ref_price}\nStop Loss: {order.stop_loss}"
             )
@@ -479,7 +477,7 @@ class Broker(AbstractBroker):
             # Return all orders
             orders = {}
             for instr, instr_orders in all_orders.items():
-                orders.update(instr_orders)
+                orders |= instr_orders
         return orders.copy()
 
     def cancel_order(
@@ -568,14 +566,13 @@ class Broker(AbstractBroker):
         net_position: refers to the number of units held in the position.
 
         """
-        if instrument:
-            # Instrument provided
-            if instrument in self._positions:
-                return {instrument: self._positions[instrument]}
-            else:
-                return {}
-        else:
+        if not instrument:
             return self._positions.copy()
+        # Instrument provided
+        if instrument in self._positions:
+            return {instrument: self._positions[instrument]}
+        else:
+            return {}
 
     def get_margin_available(self) -> float:
         """Returns the margin available on the account."""
@@ -746,14 +743,12 @@ class Broker(AbstractBroker):
             latest_time = candle.name
 
         else:
-            # No new price data
             if trade is None:
                 # No trade either, exit
                 return
-            else:
-                # Public trade received, only update limit orders
-                self._public_trade(instrument, trade)
-                return
+            # Public trade received, only update limit orders
+            self._public_trade(instrument, trade)
+            return
 
         # Open pending orders
         pending_orders = self.get_orders(instrument, "pending")
@@ -890,19 +885,17 @@ class Broker(AbstractBroker):
                 fill_time = datetime.now(tz=tz)
 
         # Check for public trade to fill order
-        if trade_size is not None:
-            # Fill limit order with trade_size provided
-            if trade_size < order.size:
-                # Create a new order for the portion to be filled by the trade
-                order = Order._partial_fill(order=order, units_filled=trade_size)
+        if trade_size is not None and trade_size < order.size:
+            # Create a new order for the portion to be filled by the trade
+            order = Order._partial_fill(order=order, units_filled=trade_size)
 
-                # Assign new order ID
-                order.id = self._get_new_order_id()
-                self._order_id_instrument[order.id] = order.instrument
+            # Assign new order ID
+            order.id = self._get_new_order_id()
+            self._order_id_instrument[order.id] = order.instrument
 
-                # Move new order to open_orders
-                # The original order will remain with reduced size
-                self._open_orders[order.instrument][order.id] = order
+            # Move new order to open_orders
+            # The original order will remain with reduced size
+            self._open_orders[order.instrument][order.id] = order
 
         order_notional = order.size * reference_price * order.HCF
         margin_required = self._calculate_margin(order_notional)
@@ -1010,12 +1003,6 @@ class Broker(AbstractBroker):
                 else:
                     # Create new entry
                     self._closed_positions[trade.instrument] = [popped_position]
-
-            elif np.sign(self._positions[trade.instrument].net_position) != np.sign(
-                starting_net_position
-            ):
-                # Position has swapped sides
-                pass
 
         else:
             # Create new position
@@ -1234,7 +1221,7 @@ class Broker(AbstractBroker):
             units_to_fill -= units_consumed
 
         avg_fill_price = sum(
-            [fill_sizes[i] * fill_prices[i] for i in range(len(fill_prices))]
+            fill_sizes[i] * fill_prices[i] for i in range(len(fill_prices))
         ) / sum(fill_sizes)
 
         # Apply slippage function
@@ -1266,18 +1253,16 @@ class Broker(AbstractBroker):
             self._taker_commission if order_type == "market" else self._maker_commission
         )
 
-        if self._commission_scheme == "percentage":
-            # Commission charged as percentage of trade value
-            trade_value = abs(units) * float(price) * HCF
-            commission = (commission_val / 100) * trade_value
-
-        elif self._commission_scheme == "fixed_per_unit":
+        if self._commission_scheme == "fixed_per_unit":
             # Fixed commission per unit traded
             commission = commission_val * units
 
         elif self._commission_scheme == "flat":
             # Flat commission value per trade
             commission = commission_val
+
+        elif self._commission_scheme == "percentage":
+            commission = commission_val / 100 * (abs(units) * price * HCF)
 
         return commission
 
@@ -1296,8 +1281,7 @@ class Broker(AbstractBroker):
         """Calculates margin required to take a position with the
         available leverage of the account.
         """
-        margin = position_value / self._leverage
-        return margin
+        return position_value / self._leverage
 
     def _update_margin(
         self, instrument: str = None, latest_time: datetime = None
@@ -1459,21 +1443,20 @@ class Broker(AbstractBroker):
         trade_units_remaining = trade_size
         open_orders = self.get_orders(instrument).copy()
         for order_id, order in open_orders.items():
-            if order.order_type == "limit":
-                if order.direction != trade_direction:
-                    # Buy trade for sell orders, Sell trade for buy orders
-                    order_price = Decimal(str(order.order_limit_price)).quantize(
-                        Decimal(str(trade_price))
+            if order.order_type == "limit" and order.direction != trade_direction:
+                # Buy trade for sell orders, Sell trade for buy orders
+                order_price = Decimal(str(order.order_limit_price)).quantize(
+                    Decimal(str(trade_price))
+                )
+                if trade_price == order_price and trade_units_remaining > 0:
+                    # Fill as much as possible
+                    trade_units_consumed = min(trade_units_remaining, order.size)
+                    self._process_order(
+                        order=order,
+                        fill_time=trade_time,
+                        reference_price=order.order_limit_price,
+                        trade_size=trade_units_consumed,
                     )
-                    if trade_price == order_price and trade_units_remaining > 0:
-                        # Fill as much as possible
-                        trade_units_consumed = min(trade_units_remaining, order.size)
-                        self._process_order(
-                            order=order,
-                            fill_time=trade_time,
-                            reference_price=order.order_limit_price,
-                            trade_size=trade_units_consumed,
-                        )
 
-                        # Update trade_units_remaining
-                        trade_units_remaining -= trade_units_consumed
+                    # Update trade_units_remaining
+                    trade_units_remaining -= trade_units_consumed

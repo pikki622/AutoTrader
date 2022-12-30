@@ -169,43 +169,39 @@ class Order:
             # Blank order
             return "Blank order"
 
-        else:
-            # Order constructed with instrument
-            if self.size is not None:
-                if self.direction is None:
-                    return "Invalid order (direction not specified)"
+        if self.size is None:
+            # Size un-assigned
+            return f"{self.instrument} {self.order_type} Order"
+        if self.direction is None:
+            return "Invalid order (direction not specified)"
 
-                side = "buy" if self.direction > 0 else "sell"
+        side = "buy" if self.direction > 0 else "sell"
 
-                string = (
-                    f"{round(self.size, self.size_precision)} "
-                    + f"unit {self.instrument} {self.order_type} "
-                    + f"{side} order"
-                )
+        string = (
+            f"{round(self.size, self.size_precision)} "
+            + f"unit {self.instrument} {self.order_type} "
+            + f"{side} order"
+        )
 
-                # Append additional information
-                if self.order_type == "limit":
-                    if self.order_limit_price is None:
-                        return "Invalid order (limit price not provided)"
-                    string += f" @ {self.order_limit_price}"
+        # Append additional information
+        if self.order_type == "limit":
+            if self.order_limit_price is None:
+                return "Invalid order (limit price not provided)"
+            string += f" @ {self.order_limit_price}"
 
-                elif self.order_type == "stop-limit":
-                    if self.order_limit_price is None:
-                        return "Invalid order (limit price not provided)"
-                    elif self.order_stop_price is None:
-                        return "Invalid order (stop price not provided)"
-                    string += f" @ {self.order_stop_price} / {self.order_limit_price}"
+        elif self.order_type == "stop-limit":
+            if self.order_limit_price is None:
+                return "Invalid order (limit price not provided)"
+            elif self.order_stop_price is None:
+                return "Invalid order (stop price not provided)"
+            string += f" @ {self.order_stop_price} / {self.order_limit_price}"
 
-                elif self.order_type == "stop":
-                    if self.order_stop_price is None:
-                        return "Invalid order (stop price not provided)"
-                    string += f" @ {self.order_stop_price}"
+        elif self.order_type == "stop":
+            if self.order_stop_price is None:
+                return "Invalid order (stop price not provided)"
+            string += f" @ {self.order_stop_price}"
 
-                return string
-
-            else:
-                # Size un-assigned
-                return f"{self.instrument} {self.order_type} Order"
+        return string
 
     def __call__(
         self,
@@ -237,8 +233,8 @@ class Order:
         None
             Calling an Order will ensure all information is present.
         """
-        self.order_price = order_price if order_price else self.order_price
-        self.order_time = order_time if order_time else self.order_time
+        self.order_price = order_price or self.order_price
+        self.order_time = order_time or self.order_time
         self.HCF = HCF if HCF is not None else self.HCF
 
         # Assign precisions
@@ -271,13 +267,13 @@ class Order:
             The working price will be saved as a class attribute.
         """
         order_price = order_price if order_price is not None else self.order_price
-        if self.order_type == "limit" or self.order_type == "stop-limit":
+        if self.order_type in ["limit", "stop-limit"]:
             self._working_price = round(self.order_limit_price, self.price_precision)
+        elif order_price is None:
+            self._working_price = None
+
         else:
-            if order_price is not None:
-                self._working_price = round(order_price, self.price_precision)
-            else:
-                self._working_price = None
+            self._working_price = round(order_price, self.price_precision)
 
     def _calculate_exit_prices(self, broker=None, working_price: float = None) -> None:
         """Calculates the prices of the exit targets from the pip distance
@@ -302,13 +298,7 @@ class Order:
             else self._working_price
         )
 
-        if broker is None:
-            # No broker provided, create nominal utils instance
-            utils = BrokerUtils()
-        else:
-            # Use broker-specific utilities
-            utils = broker._utils
-
+        utils = BrokerUtils() if broker is None else broker._utils
         pip_value = (
             self.pip_value
             if self.pip_value is not None
@@ -389,37 +379,31 @@ class Order:
             elif self.base_size is not None:
                 # Size provided in base units, need to convert it
                 self.size = round(self.base_size / HCF, self.size_precision)
-            else:
-                # Size not provided, need to calculate it
-                if sizing == "risk":
+            elif sizing == "risk":
                     # Calculate size from SL placement
-                    try:
-                        amount_risked = (
-                            amount_risked
-                            if amount_risked
-                            else broker.get_NAV() * risk_pc / 100
-                        )
+                try:
+                    amount_risked = amount_risked or broker.get_NAV() * risk_pc / 100
 
-                        size = broker._utils.get_size(
-                            instrument=self.instrument,
-                            amount_risked=amount_risked,
-                            price=working_price,
-                            HCF=HCF,
-                            stop_price=self.stop_loss,
-                            stop_distance=self.stop_distance,
-                        )
-                        self.size = round(size, self.size_precision)
+                    size = broker._utils.get_size(
+                        instrument=self.instrument,
+                        amount_risked=amount_risked,
+                        price=working_price,
+                        HCF=HCF,
+                        stop_price=self.stop_loss,
+                        stop_distance=self.stop_distance,
+                    )
+                    self.size = round(size, self.size_precision)
 
-                    except AttributeError:
-                        # Broker is None type
-                        raise Exception(
-                            "Cannot calculate size without broker access. Please "
-                            + "pass size argument, or add broker to Order object."
-                        )
+                except AttributeError:
+                    # Broker is None type
+                    raise Exception(
+                        "Cannot calculate size without broker access. Please "
+                        + "pass size argument, or add broker to Order object."
+                    )
 
-                else:
-                    # Use position size provided via sizing key
-                    self.size = sizing
+            else:
+                # Use position size provided via sizing key
+                self.size = sizing
 
         else:
             # Size has been set, enforce precision

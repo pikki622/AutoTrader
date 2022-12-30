@@ -68,34 +68,29 @@ def supertrend(
             else:
                 trend = -1
                 N_dn = i
-                dn_list.append(dn[i])
-                dn_times.append(data.index[i])
-
+                dn_list.append(dn[N_dn])
+                dn_times.append(data.index[N_dn])
                 up_list.append(np.nan)
-                up_times.append(data.index[i])
+                up_times.append(data.index[N_dn])
+        elif data.Close.values[i] < min(dn[N_dn:i]):
+            dn_list.append(min(dn[N_dn:i]))
+            dn_times.append(data.index[i])
 
+            up_list.append(np.nan)
+            up_times.append(data.index[i])
         else:
-            if data.Close.values[i] < min(dn[N_dn:i]):
-                dn_list.append(min(dn[N_dn:i]))
-                dn_times.append(data.index[i])
-
-                up_list.append(np.nan)
-                up_times.append(data.index[i])
-            else:
-                trend = 1
-                N_up = i
-                up_list.append(up[i])
-                up_times.append(data.index[i])
-
-                dn_list.append(np.nan)
-                dn_times.append(data.index[i])
-
+            trend = 1
+            N_up = i
+            up_list.append(up[N_up])
+            up_times.append(data.index[N_up])
+            dn_list.append(np.nan)
+            dn_times.append(data.index[N_up])
         trend_list.append(trend)
 
-    supertrend_df = pd.DataFrame(
-        {"uptrend": up_list, "downtrend": dn_list, "trend": trend_list}, index=up_times
+    return pd.DataFrame(
+        {"uptrend": up_list, "downtrend": dn_list, "trend": trend_list},
+        index=up_times,
     )
-    return supertrend_df
 
 
 def halftrend(
@@ -274,7 +269,7 @@ def range_filter(
     rng = _range_size(
         (high_val + low_val) / 2, "AverageChange", range_qty, range_period
     )
-    rfi = _calculate_range_filter(
+    return _calculate_range_filter(
         high_val,
         low_val,
         rng,
@@ -285,8 +280,6 @@ def range_filter(
         av_vals,
         av_samples,
     )
-
-    return rfi
 
 
 def bullish_engulfing(data: pd.DataFrame, detection: str = None):
@@ -466,12 +459,15 @@ def find_swings(data: pd.DataFrame, n: int = 2) -> pd.DataFrame:
     last_low = rolling_signal_list(lows)
     last_high = rolling_signal_list(highs)
 
-    swing_df = pd.DataFrame(
-        data={"Highs": last_high, "Lows": last_low, "Last": last_swing, "Trend": trend},
+    return pd.DataFrame(
+        data={
+            "Highs": last_high,
+            "Lows": last_low,
+            "Last": last_swing,
+            "Trend": trend,
+        },
         index=swing_data.index,
     )
-
-    return swing_df
 
 
 def classify_swings(swing_df: pd.DataFrame, tol: int = 0) -> pd.DataFrame:

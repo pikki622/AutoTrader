@@ -25,9 +25,7 @@ class Utils(BrokerUtils):
             },
             index=[candle_time],
         )
-        new_data = pd.concat([data, candle])
-
-        return new_data
+        return pd.concat([data, candle])
 
     def last_period(self, current_time, granularity, current_candle=False):
         """
@@ -44,21 +42,19 @@ class Utils(BrokerUtils):
         letter_to_unit = {"S": "second", "M": "minute", "H": "hour", "D": "day"}
 
         letter = granularity[0]
-        if len(granularity) > 1:
-            number = int(granularity[1:])
-        else:
-            number = 1
-
+        number = int(granularity[1:]) if len(granularity) > 1 else 1
         current_period = getattr(current_time, letter_to_unit[letter])
         if current_candle:
             last_period = number * np.floor(current_period / number)
         else:
             last_period = number * np.floor(current_period / number) - number
 
-        if letter == "S":
+        if letter == "H":
             td = timedelta(
                 microseconds=current_time.microsecond,
-                seconds=current_time.second - last_period,
+                seconds=current_time.second,
+                minutes=current_time.minute,
+                hours=current_time.hour - last_period,
             )
         elif letter == "M":
             td = timedelta(
@@ -66,25 +62,12 @@ class Utils(BrokerUtils):
                 seconds=current_time.second,
                 minutes=current_time.minute - last_period,
             )
-        elif letter == "H":
+        elif letter == "S":
             td = timedelta(
                 microseconds=current_time.microsecond,
-                seconds=current_time.second,
-                minutes=current_time.minute,
-                hours=current_time.hour - last_period,
+                seconds=current_time.second - last_period,
             )
-        elif letter == "H":
-            td = timedelta(
-                microseconds=current_time.microsecond,
-                seconds=current_time.second,
-                minutes=current_time.minute,
-                hours=current_time.hour,
-                days=current_time.day - last_period,
-            )
-
-        last_candle_closed = current_time - td
-
-        return last_candle_closed
+        return current_time - td
 
     def trade_summary(self, raw_livetrade_summary, ohlc_data, granularity):
         """Constructs trade summary dataframe from Oanda trade history."""
@@ -109,22 +92,17 @@ class Utils(BrokerUtils):
         raw_livetrade_summary = raw_livetrade_summary.reset_index()
         raw_livetrade_summary["Date"] = rounded_times
 
-        # Merge to preserve data int index
-        livetrade_summary = pd.merge(
+        return pd.merge(
             modified_data, raw_livetrade_summary, left_on="date", right_on="Date"
         )
 
-        return livetrade_summary
-
     def format_watchlist(self, raw_watchlist):
 
-        watchlist = []
-        for instrument in raw_watchlist:
-            if str(instrument) != "nan":
-                formatted_instrument = instrument[:3] + "_" + instrument[-3:]
-                watchlist.append(formatted_instrument)
-
-        return watchlist
+        return [
+            instrument[:3] + "_" + instrument[-3:]
+            for instrument in raw_watchlist
+            if str(instrument) != "nan"
+        ]
 
     def get_precision(self, instrument, *args, **kwargs):
         """Returns the precision of the instrument."""

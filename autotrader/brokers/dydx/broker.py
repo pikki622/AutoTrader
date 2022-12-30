@@ -121,14 +121,12 @@ class Broker(AbstractBroker):
         return self._native_order(cancelled_order.data["cancelOrder"])
 
     def cancel_all_orders(self, instrument: str = None, **kwargs):
-        cancelled_orders = self.api.private.cancel_all_orders(market=instrument)
-        return cancelled_orders
+        return self.api.private.cancel_all_orders(market=instrument)
 
     def get_trades(self, instrument: str = None, **kwargs) -> dict:
         """Returns the open trades held by the account."""
         fills = self.api.private.get_fills(market=instrument)
-        trades = self._convert_fills(fills.data["fills"])
-        return trades
+        return self._convert_fills(fills.data["fills"])
 
     def get_trade_details(self, trade_ID: str) -> dict:
         """Returns the details of the trade specified by trade_ID."""
@@ -159,21 +157,16 @@ class Broker(AbstractBroker):
     def get_markets(self):
         # Get Markets
         markets = self.api.public.get_markets()
-        market_df = pd.DataFrame(markets.data["markets"])
-        return market_df
+        return pd.DataFrame(markets.data["markets"])
 
     def get_orderbook(self, instrument: str) -> OrderBook:
-        # Get Orderbook
-        orderbook = self.autodata.L2(instrument=instrument)
-        return orderbook
+        return self.autodata.L2(instrument=instrument)
 
     def get_market_stats(self):
-        # Get Market Statistics
-        market_statistics = self.api.public.get_stats(
+        return self.api.public.get_stats(
             market=constants.MARKET_ADA_USD,
             days=1,
         )
-        return market_statistics
 
     def get_funding(self, dtime):
         # Funding Data
@@ -225,7 +218,7 @@ class Broker(AbstractBroker):
             if dydx_order["triggerPrice"] is not None
             else None
         )
-        order = Order(
+        return Order(
             instrument=dydx_order["market"],
             order_type=dydx_order["type"],
             status=dydx_order["status"].lower(),
@@ -235,7 +228,6 @@ class Broker(AbstractBroker):
             order_limit_price=order_limit_price,
             order_stop_price=order_stop_price,
         )
-        return order
 
     def _conver_order_list(self, order_list):
         orders = {}
@@ -257,26 +249,25 @@ class Broker(AbstractBroker):
                 "long_PL": dydx_position["unrealizedPnl"],
             }
 
-        native_position = Position(
+        return Position(
             instrument=dydx_position["market"],
             net_position=float(dydx_position["size"]),
             PL=dydx_position["unrealizedPnl"],
             entry_price=float(dydx_position["entryPrice"]),
             **position_units,
         )
-        return native_position
 
     def _convert_position_list(self, dydx_position_list):
-        positions = {}
-        for position in dydx_position_list:
-            positions[position["market"]] = self._native_position(position)
-        return positions
+        return {
+            position["market"]: self._native_position(position)
+            for position in dydx_position_list
+        }
 
     def _native_trade(self, dydx_fill: dict):
         """Converts a dydx fill to a native AutoTrader trade."""
         direction = 1 if dydx_fill["side"] == "BUY" else -1
 
-        native_trade = Trade(
+        return Trade(
             instrument=dydx_fill["market"],
             order_price=None,
             order_time=None,
@@ -290,14 +281,9 @@ class Broker(AbstractBroker):
             order_id=dydx_fill["orderId"],
         )
 
-        return native_trade
-
     def _convert_fills(self, dydx_fills: list):
         """Converts an array of fills to a Trades dictionary."""
-        trades = {}
-        for trade in dydx_fills:
-            trades[trade["id"]] = self._native_trade(trade)
-        return trades
+        return {trade["id"]: self._native_trade(trade) for trade in dydx_fills}
 
     def get_instrument_details(self, instrument):
         """Returns details of the instrument provided."""

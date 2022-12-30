@@ -175,7 +175,7 @@ class AutoTrader:
         self._plot_portolio_chart = False
 
     def __repr__(self):
-        return f"AutoTrader instance"
+        return "AutoTrader instance"
 
     def __str__(self):
         return "AutoTrader instance"
@@ -443,14 +443,12 @@ class AutoTrader:
                 )
                 sys.exit(0)
 
-            if self._strategy_timestep is None:
-                # Timestep hasn't been set yet; set it
+            if (
+                self._strategy_timestep is not None
+                and strat_granularity < self._strategy_timestep
+                or self._strategy_timestep is None
+            ):
                 self._strategy_timestep = strat_granularity
-
-            else:
-                # Timestep has been set, overwrite only with a smaller granularity
-                if strat_granularity < self._strategy_timestep:
-                    self._strategy_timestep = strat_granularity
 
         if strategy is not None:
             self._strategy_classes[strategy.__name__] = strategy
@@ -552,24 +550,18 @@ class AutoTrader:
         # different products
 
         # Enforce virtual broker and paper trading environment
-        if exchange is not None:
-            broker_name = exchange
-        else:
-            # TODO - catch attempt to create multiple instances with same exchange
-            broker_name = "virtual"
-
+        broker_name = exchange if exchange is not None else "virtual"
         if broker_name != "virtual" and broker_name not in self._broker_name:
             # Unrecognised broker
             print(
-                f"Please specify the broker '{broker_name}' in the "
-                + "configure method before configuring its virtual account."
+                f"Please specify the broker '{broker_name}' in the configure method before configuring its virtual account."
             )
             sys.exit(0)
-            # self._broker_name += broker_name + ', '
+                # self._broker_name += broker_name + ', '
 
-        self._papertrading = False if self._backtest_mode else papertrade
         self._broker_refresh_freq = refresh_freq
 
+        self._papertrading = False if self._backtest_mode else papertrade
         if tradeable_instruments is not None:
             self._virtual_tradeable_instruments[broker_name] = tradeable_instruments
 
@@ -634,8 +626,8 @@ class AutoTrader:
         """
         # Convert start and end strings to datetime objects
         if start_dt is None and end_dt is None:
-            start_dt = datetime.strptime(start + "+0000", "%d/%m/%Y%z")
-            end_dt = datetime.strptime(end + "+0000", "%d/%m/%Y%z")
+            start_dt = datetime.strptime(f"{start}+0000", "%d/%m/%Y%z")
+            end_dt = datetime.strptime(f"{end}+0000", "%d/%m/%Y%z")
 
         # Assign attributes
         self._backtest_mode = True
@@ -816,15 +808,14 @@ class AutoTrader:
             local_data = {}
 
             # Populate local_data
-            for product in data_dict:
-                if type(data_dict[product]) == dict:
-                    # MTF data
-                    MTF_data = {}
-                    for timeframe in data_dict[product]:
-                        MTF_data[timeframe] = os.path.join(
+            for product, value in data_dict.items():
+                if type(value) == dict:
+                    MTF_data = {
+                        timeframe: os.path.join(
                             dir_path, data_dict[product][timeframe]
                         )
-
+                        for timeframe in data_dict[product]
+                    }
                     local_data[product] = MTF_data
                 else:
                     # Single timeframe data
@@ -838,8 +829,8 @@ class AutoTrader:
             local_quote_data = {}
 
             # Populate local_quote_data
-            for product in quote_data:
-                if type(quote_data[product]) == dict:
+            for product, value_ in quote_data.items():
+                if type(value_) == dict:
                     raise Exception(
                         "Only a single quote-data file should be "
                         + "provided per instrument traded."
@@ -853,17 +844,14 @@ class AutoTrader:
             self._local_quote_data = local_quote_data
 
         if auxdata is not None:
-            modified_auxdata = {}
-            for product, item in auxdata.items():
-                if isinstance(item, dict):
-                    # Multiple datasets for product
-                    modified_auxdata[product] = {}
-                    for key, dataset in item:
-                        modified_auxdata[product][key] = os.path.join(dir_path, dataset)
-                else:
-                    # Item is not dict
-                    modified_auxdata[product] = os.path.join(dir_path, item)
-
+            modified_auxdata = {
+                product: {
+                    key: os.path.join(dir_path, dataset) for key, dataset in item
+                }
+                if isinstance(item, dict)
+                else os.path.join(dir_path, item)
+                for product, item in auxdata.items()
+            }
             self._auxdata = modified_auxdata
 
         if mapper_func is not None:
@@ -985,8 +973,7 @@ class AutoTrader:
         if self._backtest_mode:
             if self._notify > 0:
                 print(
-                    "Warning: notify set to {} ".format(self._notify)
-                    + "during backtest. Setting to zero to prevent notifications."
+                    f"Warning: notify set to {self._notify} during backtest. Setting to zero to prevent notifications."
                 )
                 self._notify = 0
 
@@ -1001,12 +988,7 @@ class AutoTrader:
 
             # Check if the broker has been configured
             if len(self._virtual_broker_config) != self._no_brokers:
-                # Virtual accounts have not been configured for the brokers specified
-                if len(self._virtual_broker_config) == 0:
-                    # Use default values for all virtual accounts
-                    for exchange in self._broker_name.split(","):
-                        self.virtual_account_config(papertrade=False, exchange=exchange)
-                else:
+                if len(self._virtual_broker_config) != 0:
                     # Partially configured accounts
                     raise Exception(
                         "Please configure the virtual accounts for "
@@ -1015,6 +997,9 @@ class AutoTrader:
                         + f" Number of virtual accounts configured: {len(self._virtual_broker_config)}"
                     )
 
+                # Use default values for all virtual accounts
+                for exchange in self._broker_name.split(","):
+                    self.virtual_account_config(papertrade=False, exchange=exchange)
         # Check notification settings
         if self._notify > 0 and self._notification_provider is None:
             print(
@@ -1032,20 +1017,23 @@ class AutoTrader:
 
         else:
             # Trading
-            if not self._backtest_mode and "virtual" in self._broker_name:
-                # Not in backtest mode, yet virtual broker is selected
-                if not self._papertrading and not self._scan_mode:
-                    # Not papertrading or scanning either
-                    print(
-                        "Live-trade mode requires setting the "
-                        + "broker. Please do so using the "
-                        + "AutoTrader configure method. If you "
-                        + "would like to use the virtual broker "
-                        + "for papertrading, please "
-                        + "configure the virtual broker account(s) "
-                        + "with the virtual_account_config method."
-                    )
-                    sys.exit()
+            if (
+                not self._backtest_mode
+                and "virtual" in self._broker_name
+                and not self._papertrading
+                and not self._scan_mode
+            ):
+                # Not papertrading or scanning either
+                print(
+                    "Live-trade mode requires setting the "
+                    + "broker. Please do so using the "
+                    + "AutoTrader configure method. If you "
+                    + "would like to use the virtual broker "
+                    + "for papertrading, please "
+                    + "configure the virtual broker account(s) "
+                    + "with the virtual_account_config method."
+                )
+                sys.exit()
 
             # Load global (account) configuration
             if self._global_config_dict is not None:
@@ -1077,7 +1065,7 @@ class AutoTrader:
                             print(f"Please provide {key} under TELEGRAM in keys.yaml.")
                             sys.exit()
 
-                tg_module = importlib.import_module(f"autotrader.comms.tg")
+                tg_module = importlib.import_module("autotrader.comms.tg")
                 self._notifier = tg_module.Telegram(
                     api_token=self._global_config_dict["TELEGRAM"]["api_key"],
                     chat_id=self._global_config_dict["TELEGRAM"]["chat_id"],
@@ -1124,15 +1112,12 @@ class AutoTrader:
                     )
                     sys.exit()
 
-                # Check broker
-                supported_exchanges = ["virtual", "oanda", "ib", "ccxt", "dydx"]
                 inputted_brokers = self._broker_name.lower().replace(" ", "").split(",")
+                supported_exchanges = ["virtual", "oanda", "ib", "ccxt", "dydx"]
                 for broker in inputted_brokers:
                     if broker.split(":")[0] not in supported_exchanges:
                         print(
-                            f"Unsupported broker requested: {self._broker_name}\n"
-                            + "Please check the broker(s) specified in configure method and "
-                            + "virtual_account_config."
+                            f"Unsupported broker requested: {self._broker_name}\nPlease check the broker(s) specified in configure method and virtual_account_config."
                         )
                         sys.exit()
 
@@ -1255,10 +1240,9 @@ class AutoTrader:
                 raise Exception(
                     f"There were no bots found to be trading '{instrument}'."
                 )
-        else:
-            if len(bots) == 1:
-                # Single bot backtest, return directly
-                bots = bots[list(bots.keys())[0]]
+        elif len(bots) == 1:
+            # Single bot backtest, return directly
+            bots = bots[list(bots.keys())[0]]
 
         return bots
 
@@ -1309,25 +1293,23 @@ class AutoTrader:
             print("\n----------------------------------------------")
             print("               Trading Results")
             print("----------------------------------------------")
-            print("Start date:              {}".format(start_date))
-            print("End date:                {}".format(end_date))
-            print("Duration:                {}".format(duration))
-            print("Starting balance:        ${}".format(round(starting_balance, 2)))
-            print("Ending balance:          ${}".format(round(ending_balance, 2)))
-            print("Ending NAV:              ${}".format(round(ending_NAV, 2)))
+            print(f"Start date:              {start_date}")
+            print(f"End date:                {end_date}")
+            print(f"Duration:                {duration}")
+            print(f"Starting balance:        ${round(starting_balance, 2)}")
+            print(f"Ending balance:          ${round(ending_balance, 2)}")
+            print(f"Ending NAV:              ${round(ending_NAV, 2)}")
             print(
-                "Total return:            ${} ({}%)".format(
-                    round(abs_return, 2), round(pc_return, 1)
-                )
+                f"Total return:            ${round(abs_return, 2)} ({round(pc_return, 1)}%)"
             )
-            print("Maximum drawdown:        {}%".format(round(max_drawdown * 100, 2)))
+            print(f"Maximum drawdown:        {round(max_drawdown * 100, 2)}%")
             if no_trades > 0:
-                print("Total no. trades:        {}".format(no_trades))
-                print("No. long trades:         {}".format(no_long_trades))
-                print("No. short trades:        {}".format(no_short_trades))
-                print("Total fees paid:         ${}".format(round(total_fees, 3)))
-                print("Total volume traded:     ${}".format(round(total_volume, 2)))
-                print("Average daily volume:    ${}".format(round(adv, 2)))
+                print(f"Total no. trades:        {no_trades}")
+                print(f"No. long trades:         {no_long_trades}")
+                print(f"No. short trades:        {no_short_trades}")
+                print(f"Total fees paid:         ${round(total_fees, 3)}")
+                print(f"Total volume traded:     ${round(total_volume, 2)}")
+                print(f"Average daily volume:    ${round(adv, 2)}")
                 # print("Win rate:                {}%".format(round(win_rate, 1)))
                 # print("Max win:                 ${}".format(round(max_win, 2)))
                 # print("Average win:             ${}".format(round(avg_win, 2)))
@@ -1351,14 +1333,14 @@ class AutoTrader:
 
                 no_open = trade_summary["no_open"]
                 if no_open > 0:
-                    print("Positions still open:    {}".format(no_open))
+                    print(f"Positions still open:    {no_open}")
 
             else:
                 print("\n No trades made.")
 
             no_cancelled = trade_summary["no_cancelled"]
             if no_cancelled > 0:
-                print("Cancelled orders:        {}".format(no_cancelled))
+                print(f"Cancelled orders:        {no_cancelled}")
 
             # if len(trade_results.position_summary) > 0:
             #     # Long positions
@@ -1418,47 +1400,47 @@ class AutoTrader:
             if len(trade_results.instruments_traded) > 1:
                 # Mutliple instruments traded
                 instruments = trade_results.instruments_traded
-            #     trade_history = trade_results.isolated_position_history
+                #     trade_history = trade_results.isolated_position_history
 
-            #     total_no_trades = []
-            #     max_wins = []
-            #     max_losses = []
-            #     avg_wins = []
-            #     avg_losses = []
-            #     profitable_trades = []
-            #     win_rates = []
-            #     for i in range(len(instruments)):
-            #         instrument_trades = trade_history[
-            #             trade_history.instrument == instruments[i]
-            #         ]
-            #         no_trades = len(instrument_trades)
-            #         total_no_trades.append(no_trades)
-            #         max_wins.append(instrument_trades.profit.max())
-            #         max_losses.append(instrument_trades.profit.min())
-            #         avg_wins.append(
-            #             instrument_trades.profit[instrument_trades.profit > 0].mean()
-            #         )
-            #         avg_losses.append(
-            #             instrument_trades.profit[instrument_trades.profit < 0].mean()
-            #         )
-            #         profitable_trades.append((instrument_trades.profit > 0).sum())
-            #         win_rates.append(
-            #             100 * profitable_trades[i] / no_trades if no_trades > 0 else 0.0
-            #         )
+                #     total_no_trades = []
+                #     max_wins = []
+                #     max_losses = []
+                #     avg_wins = []
+                #     avg_losses = []
+                #     profitable_trades = []
+                #     win_rates = []
+                #     for i in range(len(instruments)):
+                #         instrument_trades = trade_history[
+                #             trade_history.instrument == instruments[i]
+                #         ]
+                #         no_trades = len(instrument_trades)
+                #         total_no_trades.append(no_trades)
+                #         max_wins.append(instrument_trades.profit.max())
+                #         max_losses.append(instrument_trades.profit.min())
+                #         avg_wins.append(
+                #             instrument_trades.profit[instrument_trades.profit > 0].mean()
+                #         )
+                #         avg_losses.append(
+                #             instrument_trades.profit[instrument_trades.profit < 0].mean()
+                #         )
+                #         profitable_trades.append((instrument_trades.profit > 0).sum())
+                #         win_rates.append(
+                #             100 * profitable_trades[i] / no_trades if no_trades > 0 else 0.0
+                #         )
 
-            #     results = pd.DataFrame(
-            #         data={
-            #             "Instrument": instruments,
-            #             "Max. Win": max_wins,
-            #             "Max. Loss": max_losses,
-            #             "Avg. Win": avg_wins,
-            #             "Avg. Loss": avg_losses,
-            #             "Win Rate": win_rates,
-            #         }
-            #     ).fillna(0)
+                #     results = pd.DataFrame(
+                #         data={
+                #             "Instrument": instruments,
+                #             "Max. Win": max_wins,
+                #             "Max. Loss": max_losses,
+                #             "Avg. Win": avg_wins,
+                #             "Avg. Loss": avg_losses,
+                #             "Win Rate": win_rates,
+                #         }
+                #     ).fillna(0)
 
-            #     print("\n Instrument Breakdown:")
-            #     print(results.to_string(index=False))
+                #     print("\n Instrument Breakdown:")
+                #     print(results.to_string(index=False))
 
         else:
             print("No updates to report.")
